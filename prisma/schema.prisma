@@ -1,0 +1,54 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Checklist {
+  checklist  String @id @db.VarChar(100)
+  nome       String @db.VarChar(200)
+  diretorio  String @db.VarChar(100)
+  tabela     String @db.VarChar(100)
+
+  @@map("checklist")
+}
+
+model ChecklistPerguntas {
+  id        Int    @id @default(autoincrement())
+  checklist String @db.VarChar(100)
+  pergunta  String @db.VarChar(500)
+  campo     String @db.VarChar(200)
+  default_value String? @map("default") @db.VarChar(255)
+  ordem     Int?
+
+  @@map("checklist_perguntas")
+}
+
+model Consultor {
+  codConsultor Int    @id @default(autoincrement())
+  nome         String @db.VarChar(200)
+  email        String? @db.VarChar(100)
+  assinatura   String? @db.Text
+
+  @@map("consultor")
+}
+
+model Mecanico {
+  codMecanico Int    @id @default(autoincrement())
+  nome        String @db.VarChar(200)
+  email       String? @db.VarChar(100)
+
+  @@map("mecanico")
+}
+
+model Concessionaria {
+  codConcessionaria Int    @id @default(autoincrement())
+  nome              String @db.VarChar(200)
+  endereco          String? @db.Text
+  telefone          String? @db.VarChar(20)
+
+  @@map("concessionaria")
+}

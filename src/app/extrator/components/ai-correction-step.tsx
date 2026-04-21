@@ -1,0 +1,731 @@
+"use client";
+
+import { useState, useCallback } from "react";
+import {
+  Sparkles,
+  Layers,
+  Copy,
+  Download,
+  ArrowLeftRight,
+  Loader2,
+  FileText,
+  Table2,
+  RefreshCw,
+  FileCode,
+  List,
+} from "lucide-react";
+import { showToast } from "@/components/ui/toast";
+import { AI_MODELS, type UploadedImage } from "@/lib/types";
+import type { MigrationField } from "@/app/api/generate-fields/route";
+
+type Project = "entrega-impecavel" | "pos-venda";
+
+interface Props {
+  pdfFile: File | null;
+  images: UploadedImage[];
+  project: Project;
+  onOpenApiKeyModal: () => void;
+}
+
+type ProcessingStep = "extracting" | "correcting" | "generating-fields" | null;
+type ResultTab = "corrected" | "fields";
+
+export function AiCorrectionStep({
+  pdfFile,
+  images,
+  project,
+  onOpenApiKeyModal,
+}: Props) {
+  const [model, setModel] = useState("gemini-2.5-flash");
+  const [keepFormat, setKeepFormat] = useState(true);
+  const [fixOrtho, setFixOrtho] = useState(true);
+  const [matchImage, setMatchImage] = useState(true);
+  const [instructions, setInstructions] = useState("");
+  const [correctedText, setCorrectedText] = useState("");
+  const [extractedText, setExtractedText] = useState("");
+  const [extractedPages, setExtractedPages] = useState<string[]>([]);
+  const [processingStep, setProcessingStep] = useState<ProcessingStep>(null);
+  const [showDiff, setShowDiff] = useState(false);
+  const [migrationFields, setMigrationFields] = useState<MigrationField[]>([]);
+  const [activeTab, setActiveTab] = useState<ResultTab>("corrected");
+  const [migrationTableName, setMigrationTableName] = useState("tabela_generica");
+
+  const isProcessing = processingStep !== null;
+
+  const getApiKey = useCallback((): string | null => {
+    if (typeof window === "undefined") return null;
+    const stored = localStorage.getItem("checklist_tools_api_key");
+    if (!stored) return null;
+    try {
+      return atob(stored);
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const extractPdf = useCallback(async (): Promise<{ text: string; pages: string[] } | null> => {
+    if (!pdfFile) return null;
+    setProcessingStep("extracting");
+
+    const formData = new FormData();
+    formData.append("pdf", pdfFile);
+
+    const res = await fetch("/api/extract-pdf", {
+      method: "POST",
+      body: formData,
+    });
+
+    const data = await res.json();
+    if (!data.success) {
+      showToast("Erro ao extrair PDF: " + data.error, "error");
+      return null;
+    }
+
+    const text: string = data.text || "";
+    const pages: string[] = data.pages || [];
+
+    setExtractedText(text);
+    setExtractedPages(pages);
+    return { text, pages };
+  }, [pdfFile]);
+
+  const generateFields = useCallback(
+    async (text: string, apiKey: string) => {
+      setProcessingStep("generating-fields");
+      try {
+        const res = await fetch("/api/generate-fields", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, model, apiKey }),
+        });
+        const data = await res.json();
+        if (data.success && Array.isArray(data.fields)) {
+          setMigrationFields(data.fields);
+          setActiveTab("fields");
+          showToast(`${data.fields.length} campos de migration gerados!`, "success");
+        } else {
+          showToast("Erro ao gerar campos: " + data.error, "error");
+        }
+      } catch (err) {
+        console.error(err);
+        showToast("Erro ao gerar campos de migration", "error");
+      } finally {
+        setProcessingStep(null);
+      }
+    },
+    [model]
+  );
+
+  const correctText = useCallback(
+    async (perPage: boolean) => {
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        showToast("Configure sua API Key primeiro.", "error");
+        onOpenApiKeyModal();
+        return;
+      }
+      if (!pdfFile) {
+        showToast("Selecione um PDF na etapa anterior.", "error");
+        return;
+      }
+      if (images.length === 0) {
+        showToast("Envie pelo menos uma imagem de referência.", "error");
+        return;
+      }
+
+      try {
+        const extracted = await extractPdf();
+        if (!extracted) return;
+
+        setProcessingStep("correcting");
+        const { text, pages } = extracted;
+
+        let finalText = "";
+
+        if (perPage && pages.length > 1) {
+          const results: string[] = [];
+          for (let i = 0; i < pages.length; i++) {
+            const pageText = pages[i];
+            if (!pageText.trim()) continue;
+
+            const formData = buildFormData(pageText, apiKey, i + 1);
+
+            if (images[i]) {
+              formData.append("images[0]", images[i].file);
+            } else {
+              formData.append("images[0]", images[images.length - 1].file);
+            }
+
+            const res = await fetch("/api/correct-text", {
+              method: "POST",
+              body: formData,
+            });
+            const data = await res.json();
+
+            if (data.success) {
+              results.push(data.correctedText);
+            } else {
+              results.push(`[ERRO pág. ${i + 1}: ${data.error}]\n${pageText}`);
+            }
+          }
+          finalText = results.join("\n\n--- Página ---\n\n");
+          setCorrectedText(finalText);
+          setActiveTab("corrected");
+          showToast("Correção por página concluída!", "success");
+        } else {
+          const formData = buildFormData(text, apiKey);
+          images.forEach((img, idx) => {
+            formData.append(`images[${idx}]`, img.file);
+          });
+
+          const res = await fetch("/api/correct-text", {
+            method: "POST",
+            body: formData,
+          });
+          const data = await res.json();
+
+          if (data.success) {
+            finalText = data.correctedText;
+            setCorrectedText(finalText);
+            setActiveTab("corrected");
+            showToast("Texto corrigido com sucesso!", "success");
+          } else {
+            showToast("Erro da IA: " + data.error, "error");
+            return;
+          }
+        }
+
+        // Automatically generate migration fields for entrega-impecavel
+        if (finalText && project === "entrega-impecavel") {
+          await generateFields(finalText, apiKey);
+        }
+      } catch (err) {
+        console.error(err);
+        showToast("Erro ao processar", "error");
+      } finally {
+        setProcessingStep(null);
+      }
+    },
+    [pdfFile, images, model, keepFormat, fixOrtho, matchImage, instructions, getApiKey, onOpenApiKeyModal, extractPdf, project, generateFields]
+  );
+
+  function buildFormData(text: string, apiKey: string, pageNumber?: number): FormData {
+    const fd = new FormData();
+    fd.append("text", text);
+    fd.append("model", model);
+    fd.append("apiKey", apiKey);
+    fd.append("keepFormat", keepFormat ? "1" : "0");
+    fd.append("fixOrtho", fixOrtho ? "1" : "0");
+    fd.append("matchImage", matchImage ? "1" : "0");
+    fd.append("additionalInstructions", instructions);
+    fd.append("project", project);
+    if (pageNumber) fd.append("pageNumber", String(pageNumber));
+    return fd;
+  }
+
+  function buildMigrationCode(tableName: string, fields: MigrationField[]): string {
+    const safeTable = tableName.trim() || "tabela_generica";
+    const cols = fields
+      .map((f) => `            $table->integer('${f.campo}')->nullable();`)
+      .join("\n");
+    return `<?php
+
+use Illuminate\\Database\\Migrations\\Migration;
+use Illuminate\\Database\\Schema\\Blueprint;
+use Illuminate\\Support\\Facades\\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('${safeTable}', function (Blueprint $table) {
+${cols}
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('${safeTable}');
+    }
+};`;
+  }
+
+  const geminiModels = AI_MODELS.filter((m) => m.provider === "gemini");
+  const openaiModels = AI_MODELS.filter((m) => m.provider === "openai");
+  const canRun = !!pdfFile && images.length > 0 && !isProcessing;
+  const hasPages = extractedPages.length > 1;
+
+  return (
+    <div className="space-y-6">
+      {/* Options */}
+      <div className="grid sm:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm text-gray-400 mb-1.5">Modelo</label>
+          <select
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+          >
+            <optgroup label="Google Gemini (gratuito)">
+              {geminiModels.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="OpenAI (pago)">
+              {openaiModels.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </optgroup>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm text-gray-400 mb-1.5">
+            Instruções adicionais
+          </label>
+          <textarea
+            value={instructions}
+            onChange={(e) => setInstructions(e.target.value)}
+            rows={2}
+            placeholder="Ex: Manter formatação de tabela, preservar números..."
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-x-6 gap-y-2">
+        <label className="flex items-center gap-2 text-sm cursor-pointer">
+          <input
+            type="checkbox"
+            checked={keepFormat}
+            onChange={(e) => setKeepFormat(e.target.checked)}
+            className="rounded bg-gray-700 border-gray-600 text-violet-500 focus:ring-violet-500"
+          />
+          Preservar formatação
+        </label>
+        <label className="flex items-center gap-2 text-sm cursor-pointer">
+          <input
+            type="checkbox"
+            checked={fixOrtho}
+            onChange={(e) => setFixOrtho(e.target.checked)}
+            className="rounded bg-gray-700 border-gray-600 text-violet-500 focus:ring-violet-500"
+          />
+          Corrigir ortografia
+        </label>
+        <label className="flex items-center gap-2 text-sm cursor-pointer">
+          <input
+            type="checkbox"
+            checked={matchImage}
+            onChange={(e) => setMatchImage(e.target.checked)}
+            className="rounded bg-gray-700 border-gray-600 text-violet-500 focus:ring-violet-500"
+          />
+          Coincidir com imagens
+        </label>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex flex-wrap gap-3 items-center">
+        <button
+          onClick={() => correctText(false)}
+          disabled={!canRun}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 disabled:from-gray-700 disabled:to-gray-700 disabled:text-gray-400 font-medium transition-all"
+        >
+          {isProcessing ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Sparkles className="w-4 h-4" />
+          )}
+          {isProcessing ? (
+            processingStep === "extracting"
+              ? "Extraindo PDF..."
+              : processingStep === "generating-fields"
+              ? "Gerando campos..."
+              : "Corrigindo com IA..."
+          ) : (
+            "Corrigir com IA"
+          )}
+        </button>
+
+        {hasPages && (
+          <button
+            onClick={() => correctText(true)}
+            disabled={!canRun}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800 disabled:text-gray-500 text-sm transition-colors"
+          >
+            <Layers className="w-4 h-4" />
+            Corrigir por Página
+          </button>
+        )}
+
+        {isProcessing && (
+          <span className="flex items-center gap-2 text-sm text-gray-400">
+            <FileText className="w-4 h-4" />
+            {processingStep === "extracting"
+              ? "Lendo o PDF..."
+              : processingStep === "generating-fields"
+              ? "Gerando campos de migration..."
+              : "Enviando para a IA..."}
+          </span>
+        )}
+      </div>
+
+      {/* Result Tabs */}
+      {(correctedText || migrationFields.length > 0) && (
+        <div className="pt-4 border-t border-gray-800 space-y-4">
+          {/* Tab Bar */}
+          <div className="flex items-center gap-1 bg-gray-800/60 rounded-xl p-1 w-fit">
+            <button
+              onClick={() => setActiveTab("corrected")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                activeTab === "corrected"
+                  ? "bg-violet-600 text-white shadow"
+                  : "text-gray-400 hover:text-gray-200"
+              }`}
+            >
+              <Sparkles className="w-4 h-4" />
+              Perguntas Completas
+              {correctedText && (
+                <span className="ml-1 text-xs opacity-70">
+                  ({correctedText.split("\n").filter((l) => l.trim()).length} linhas)
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab("fields")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                activeTab === "fields"
+                  ? "bg-emerald-600 text-white shadow"
+                  : "text-gray-400 hover:text-gray-200"
+              }`}
+            >
+              <Table2 className="w-4 h-4" />
+              Campos de Migration
+              {migrationFields.length > 0 && (
+                <span className="ml-1 text-xs opacity-70">
+                  ({migrationFields.length})
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* Tab: Perguntas Completas */}
+          {activeTab === "corrected" && correctedText && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-medium text-green-400 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4" />
+                  Texto Corrigido
+                </h3>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(correctedText);
+                      showToast("Texto corrigido copiado!", "success");
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    Copiar
+                  </button>
+                  <button
+                    onClick={() => {
+                      const blob = new Blob([correctedText], {
+                        type: "text/plain;charset=utf-8",
+                      });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = "texto_corrigido.txt";
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Baixar
+                  </button>
+                  <button
+                    onClick={() => setShowDiff(!showDiff)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                  >
+                    <ArrowLeftRight className="w-3.5 h-3.5" />
+                    Comparar
+                  </button>
+                </div>
+              </div>
+
+              <textarea
+                value={correctedText}
+                onChange={(e) => setCorrectedText(e.target.value)}
+                rows={12}
+                className="w-full bg-gray-800 border border-green-800/50 rounded-lg p-4 text-sm font-mono resize-y focus:outline-none focus:ring-2 focus:ring-green-500/50"
+              />
+
+              {showDiff && (
+                <DiffView original={extractedText} corrected={correctedText} />
+              )}
+            </div>
+          )}
+
+          {/* Tab: Campos de Migration */}
+          {activeTab === "fields" && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-medium text-emerald-400 flex items-center gap-2">
+                  <Table2 className="w-4 h-4" />
+                  Campos de Migration
+                </h3>
+                <div className="flex gap-2">
+                  {correctedText && (
+                    <button
+                      onClick={() => {
+                        const apiKey = getApiKey();
+                        if (!apiKey) {
+                          showToast("Configure sua API Key primeiro.", "error");
+                          onOpenApiKeyModal();
+                          return;
+                        }
+                        generateFields(correctedText, apiKey);
+                      }}
+                      disabled={isProcessing}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-sm transition-colors"
+                    >
+                      {processingStep === "generating-fields" ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-3.5 h-3.5" />
+                      )}
+                      Regenerar
+                    </button>
+                  )}
+                  {migrationFields.length > 0 && (
+                    <>
+                      <button
+                        onClick={() => {
+                          const campos = migrationFields
+                            .map((f) => f.campo)
+                            .join("\n");
+                          navigator.clipboard.writeText(campos);
+                          showToast("Campos copiados!", "success");
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                      >
+                        <List className="w-3.5 h-3.5" />
+                        Copiar campos
+                      </button>
+                      <button
+                        onClick={() => {
+                          const csv =
+                            "campo\tpergunta\n" +
+                            migrationFields
+                              .map(
+                                (f) =>
+                                  `"${f.campo}"\t"${f.pergunta.replace(/"/g, '""')}"`
+                              )
+                              .join("\n");
+                          navigator.clipboard.writeText(csv);
+                          showToast("Tabela copiada (TSV)!", "success");
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        Copiar TSV
+                      </button>
+                      <button
+                        onClick={() => {
+                          const json = JSON.stringify(migrationFields, null, 2);
+                          const blob = new Blob([json], {
+                            type: "application/json;charset=utf-8",
+                          });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = "campos_migration.json";
+                          a.click();
+                          URL.revokeObjectURL(url);
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Baixar JSON
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {processingStep === "generating-fields" ? (
+                <div className="flex items-center justify-center gap-3 py-12 text-gray-400">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span className="text-sm">Gerando campos com IA...</span>
+                </div>
+              ) : migrationFields.length > 0 ? (
+                <div className="space-y-6">
+                  {/* Tabela campo + pergunta */}
+                  <div className="overflow-auto rounded-lg border border-gray-700">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-800 border-b border-gray-700">
+                          <th className="text-left px-4 py-3 text-emerald-400 font-semibold w-56">
+                            campo
+                          </th>
+                          <th className="text-left px-4 py-3 text-gray-300 font-semibold">
+                            pergunta
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {migrationFields.map((field, idx) => (
+                          <tr
+                            key={idx}
+                            className="border-b border-gray-800 hover:bg-gray-800/50 transition-colors"
+                          >
+                            <td className="px-4 py-3 font-mono text-emerald-300 whitespace-nowrap">
+                              {field.campo}
+                            </td>
+                            <td className="px-4 py-3 text-gray-300">
+                              {field.pergunta}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Estrutura da Migration */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
+                        <FileCode className="w-4 h-4 text-orange-400" />
+                        Estrutura da Migration (Laravel)
+                      </h4>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(
+                            buildMigrationCode(migrationTableName, migrationFields)
+                          );
+                          showToast("Migration copiada!", "success");
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        Copiar
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-gray-400 whitespace-nowrap">Nome da tabela:</label>
+                      <input
+                        type="text"
+                        value={migrationTableName}
+                        onChange={(e) => setMigrationTableName(e.target.value)}
+                        placeholder="tabela_generica"
+                        className="flex-1 max-w-xs bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+                      />
+                    </div>
+                    <pre className="bg-gray-900 border border-gray-700 rounded-lg p-4 text-xs font-mono text-gray-300 overflow-auto max-h-96 whitespace-pre">
+                      {buildMigrationCode(migrationTableName, migrationFields)}
+                    </pre>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center gap-3 py-12 text-gray-500">
+                  <Table2 className="w-8 h-8 opacity-40" />
+                  <p className="text-sm">
+                    Nenhum campo gerado. Corrija o texto primeiro.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiffView({
+  original,
+  corrected,
+}: {
+  original: string;
+  corrected: string;
+}) {
+  const oldWords = original.split(/(\s+)/);
+  const newWords = corrected.split(/(\s+)/);
+
+  // Simple LCS-based diff
+  const maxLen = Math.max(oldWords.length, newWords.length);
+  if (maxLen > 5000) {
+    return (
+      <div className="p-4 bg-gray-800 rounded-lg text-sm text-gray-400">
+        Texto muito longo para comparação visual.
+      </div>
+    );
+  }
+
+  const dp: number[][] = Array.from({ length: oldWords.length + 1 }, () =>
+    Array(newWords.length + 1).fill(0)
+  );
+
+  for (let i = 0; i <= oldWords.length; i++) dp[i][0] = i;
+  for (let j = 0; j <= newWords.length; j++) dp[0][j] = j;
+
+  for (let i = 1; i <= oldWords.length; i++) {
+    for (let j = 1; j <= newWords.length; j++) {
+      if (oldWords[i - 1] === newWords[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1];
+      } else {
+        dp[i][j] =
+          1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+      }
+    }
+  }
+
+  const ops: { type: "equal" | "added" | "removed"; value: string }[] = [];
+  let i = oldWords.length,
+    j = newWords.length;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldWords[i - 1] === newWords[j - 1]) {
+      ops.unshift({ type: "equal", value: oldWords[i - 1] });
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] <= dp[i - 1][j])) {
+      ops.unshift({ type: "added", value: newWords[j - 1] });
+      j--;
+    } else {
+      ops.unshift({ type: "removed", value: oldWords[i - 1] });
+      i--;
+    }
+  }
+
+  return (
+    <div className="p-4 bg-gray-800 rounded-lg text-sm font-mono whitespace-pre-wrap max-h-80 overflow-auto">
+      {ops.map((op, idx) => (
+        <span
+          key={idx}
+          className={
+            op.type === "added"
+              ? "bg-green-800/50 text-green-300"
+              : op.type === "removed"
+              ? "bg-red-800/50 text-red-300 line-through"
+              : ""
+          }
+        >
+          {op.value}
+        </span>
+      ))}
+      <div className="mt-3 pt-3 border-t border-gray-700 flex gap-4 text-xs text-gray-500">
+        <span className="flex items-center gap-1">
+          <span className="w-3 h-3 bg-green-800/50 rounded" /> Adicionado
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="w-3 h-3 bg-red-800/50 rounded" /> Removido
+        </span>
+      </div>
+    </div>
+  );
+}
