@@ -58,6 +58,7 @@ export function AiCorrectionStep({
   const [migrationTableName, setMigrationTableName] = useState("tabela_generica");
   const [workingGroups, setWorkingGroups] = useState<WorkingGroup[]>([]);
   const [maxQPerSection, setMaxQPerSection] = useState<number>(0);
+  const [checklistId, setChecklistId] = useState("217");
 
   const isProcessing = processingStep !== null;
 
@@ -349,6 +350,37 @@ ${cols}
         Schema::dropIfExists('${safeTable}');
     }
 };`;
+  }
+
+  function buildStatusRows(groups: WorkingGroup[]): string {
+    const q = (val: string) => `"${val}"`;
+    const row = (vals: string[]) => vals.map(q).join(" ");
+    const id = checklistId.trim() || "217";
+
+    const dataRow = (etapa: number, name: string, isFirst: boolean, isLast: boolean) =>
+      row([
+        id, String(etapa), "[NULL]", name,
+        "warning", "sempagina.php", "sempagina.php", "sempagina.php",
+        "1",
+        isLast ? "Salvar e Finalizar" : "Salvar e Continuar",
+        isFirst ? "insert" : "update",
+        isFirst ? "post" : "put",
+        isLast ? "1" : "0",
+        isLast ? "1" : "0",
+        "1", "", "0", "0", "0", "0;1", "Checklist", "", "0",
+      ]);
+
+    const endRow = (etapa: number) =>
+      row([id, String(etapa), "[NULL]", "Finalizado", "end", "", "", "", "0", "", "", "", "0", "0", "1", "", "0", "0", "0", "0;1;2", "Checklist", "", "0"]);
+
+    const lines: string[] = [
+      dataRow(0, "Dados do Veiculo e Cliente", true, false),
+      ...groups.map((g, i) =>
+        dataRow(i + 1, getDisplayLabel(groups, g), false, i === groups.length - 1)
+      ),
+      endRow(groups.length + 1),
+    ];
+    return lines.join("\n");
   }
 
   const geminiModels = AI_MODELS.filter((m) => m.provider === "gemini");
@@ -896,6 +928,37 @@ ${cols}
                   <p className="text-xs text-gray-600 text-center max-w-xs">
                     As seções são detectadas automaticamente quando o texto contém títulos numerados em maiúsculas, como &quot;1 NOME DA SEÇÃO&quot;.
                   </p>
+                </div>
+              )}
+
+              {/* Formato DB */}
+              {workingGroups.length > 0 && (
+                <div className="space-y-3 pt-3 border-t border-gray-700/50">
+                  <div className="flex items-center justify-between gap-3">
+                    <h4 className="text-sm font-medium text-sky-400">Formato DB (checklist_status)</h4>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-gray-400">ID do checklist:</label>
+                      <input
+                        type="text"
+                        value={checklistId}
+                        onChange={(e) => setChecklistId(e.target.value)}
+                        className="w-20 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-sky-500/50"
+                      />
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(buildStatusRows(workingGroups));
+                          showToast("Formato DB copiado!", "success");
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-800/40 hover:bg-sky-700/50 text-sky-300 text-sm transition-colors"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        Copiar
+                      </button>
+                    </div>
+                  </div>
+                  <pre className="bg-gray-900 border border-gray-700 rounded-lg p-3 text-xs text-gray-300 overflow-x-auto whitespace-pre">
+                    {buildStatusRows(workingGroups)}
+                  </pre>
                 </div>
               )}
             </div>
