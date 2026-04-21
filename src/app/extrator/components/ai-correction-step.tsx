@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   Sparkles,
   Layers,
@@ -13,10 +13,17 @@ import {
   RefreshCw,
   FileCode,
   List,
+  Tag,
 } from "lucide-react";
 import { showToast } from "@/components/ui/toast";
 import { AI_MODELS, type UploadedImage } from "@/lib/types";
 import type { MigrationField } from "@/app/api/generate-fields/route";
+
+interface WorkingGroup {
+  id: string;
+  baseLabel: string;
+  questions: string[];
+}
 
 type Project = "entrega-impecavel" | "pos-venda";
 
@@ -28,7 +35,7 @@ interface Props {
 }
 
 type ProcessingStep = "extracting" | "correcting" | "generating-fields" | null;
-type ResultTab = "corrected" | "fields";
+type ResultTab = "corrected" | "fields" | "sections";
 
 export function AiCorrectionStep({
   pdfFile,
@@ -49,6 +56,8 @@ export function AiCorrectionStep({
   const [migrationFields, setMigrationFields] = useState<MigrationField[]>([]);
   const [activeTab, setActiveTab] = useState<ResultTab>("corrected");
   const [migrationTableName, setMigrationTableName] = useState("tabela_generica");
+  const [workingGroups, setWorkingGroups] = useState<WorkingGroup[]>([]);
+  const [maxQPerSection, setMaxQPerSection] = useState<number>(0);
 
   const isProcessing = processingStep !== null;
 
@@ -223,6 +232,98 @@ export function AiCorrectionStep({
     return fd;
   }
 
+  function parseSectionsFromText(text: string): { id: string; name: string; questions: string[] }[] {
+    const sectionRegex = /^\d+\s+[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇÀÈÌÒÙÄËÏÖÜ]/;
+    const lines = text.split("\n");
+    const sections: { id: string; name: string; questions: string[] }[] = [];
+    let current: { id: string; name: string; questions: string[] } | null = null;
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line || line.startsWith("---")) continue;
+      if (sectionRegex.test(line)) {
+        if (current) sections.push(current);
+        const name = line
+          .replace(/^\d+\s+/, "")
+          .replace(/\s+STATUS\s*$/i, "")
+          .trim();
+        current = { id: `sec-${sections.length}`, name, questions: [] };
+      } else if (current) {
+        current.questions.push(line);
+      }
+    }
+    if (current) sections.push(current);
+    return sections;
+  }
+
+  function getDisplayLabel(groups: WorkingGroup[], group: WorkingGroup): string {
+    const peers = groups.filter((g) => g.baseLabel === group.baseLabel);
+    if (peers.length <= 1) return group.baseLabel;
+    const idx = peers.findIndex((g) => g.id === group.id) + 1;
+    return `${group.baseLabel} [${idx}/${peers.length}]`;
+  }
+
+  function handleJoin(idx: number) {
+    setWorkingGroups((prev) => {
+      const a = prev[idx], b = prev[idx + 1];
+      const cleanA = a.baseLabel;
+      const cleanB = b.baseLabel;
+      const newLabel = cleanA === cleanB ? cleanA : `${cleanA} & ${cleanB}`;
+      const merged: WorkingGroup = {
+        id: `${a.id}+${b.id}`,
+        baseLabel: newLabel,
+        questions: [...a.questions, ...b.questions],
+      };
+      return [...prev.slice(0, idx), merged, ...prev.slice(idx + 2)];
+    });
+  }
+
+  function handleSplit(idx: number) {
+    setWorkingGroups((prev) => {
+      const g = prev[idx];
+      if (g.questions.length < 2) return prev;
+      const mid = Math.ceil(g.questions.length / 2);
+      const part1: WorkingGroup = { id: `${g.id}-a`, baseLabel: g.baseLabel, questions: g.questions.slice(0, mid) };
+      const part2: WorkingGroup = { id: `${g.id}-b`, baseLabel: g.baseLabel, questions: g.questions.slice(mid) };
+      return [...prev.slice(0, idx), part1, part2, ...prev.slice(idx + 1)];
+    });
+  }
+
+  function handleAutoSplit(maxQ: number) {
+    if (!maxQ || maxQ < 1) return;
+    setWorkingGroups((prev) => {
+      let result = [...prev];
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (let i = 0; i < result.length; i++) {
+          if (result[i].questions.length > maxQ) {
+            const g = result[i];
+            const mid = Math.ceil(g.questions.length / 2);
+            const p1: WorkingGroup = { id: `${g.id}-a`, baseLabel: g.baseLabel, questions: g.questions.slice(0, mid) };
+            const p2: WorkingGroup = { id: `${g.id}-b`, baseLabel: g.baseLabel, questions: g.questions.slice(mid) };
+            result = [...result.slice(0, i), p1, p2, ...result.slice(i + 1)];
+            changed = true;
+            break;
+          }
+        }
+      }
+      return result;
+    });
+  }
+
+  function handleResetSections() {
+    const secs = parseSectionsFromText(correctedText);
+    setWorkingGroups(secs.map((s) => ({ id: s.id, baseLabel: s.name, questions: s.questions })));
+  }
+
+  // Sync workingGroups when correctedText changes
+  useEffect(() => {
+    if (!correctedText) { setWorkingGroups([]); return; }
+    const secs = parseSectionsFromText(correctedText);
+    setWorkingGroups(secs.map((s) => ({ id: s.id, baseLabel: s.name, questions: s.questions })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [correctedText]);
+
   function buildMigrationCode(tableName: string, fields: MigrationField[]): string {
     const safeTable = tableName.trim() || "tabela_generica";
     const cols = fields
@@ -377,7 +478,7 @@ ${cols}
       {(correctedText || migrationFields.length > 0) && (
         <div className="pt-4 border-t border-gray-800 space-y-4">
           {/* Tab Bar */}
-          <div className="flex items-center gap-1 bg-gray-800/60 rounded-xl p-1 w-fit">
+          <div className="flex items-center gap-1 bg-gray-800/60 rounded-xl p-1 w-fit flex-wrap">
             <button
               onClick={() => setActiveTab("corrected")}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
@@ -410,6 +511,22 @@ ${cols}
                 </span>
               )}
             </button>
+            {correctedText && (
+              <button
+                onClick={() => setActiveTab("sections")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  activeTab === "sections"
+                    ? "bg-sky-600 text-white shadow"
+                    : "text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                <Tag className="w-4 h-4" />
+                Status / Seções
+                {workingGroups.length > 0 && (
+                  <span className="ml-1 text-xs opacity-70">({workingGroups.length})</span>
+                )}
+              </button>
+            )}
           </div>
 
           {/* Tab: Perguntas Completas */}
@@ -636,6 +753,148 @@ ${cols}
                   <Table2 className="w-8 h-8 opacity-40" />
                   <p className="text-sm">
                     Nenhum campo gerado. Corrija o texto primeiro.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Tab: Status / Seções */}
+          {activeTab === "sections" && correctedText && (
+            <div className="space-y-4">
+              {/* Toolbar */}
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-gray-400 whitespace-nowrap">Máx. perguntas por seção:</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={maxQPerSection || ""}
+                    onChange={(e) => setMaxQPerSection(Number(e.target.value))}
+                    placeholder="manual"
+                    className="w-20 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-sky-500/50"
+                  />
+                  <button
+                    onClick={() => handleAutoSplit(maxQPerSection)}
+                    disabled={!maxQPerSection}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-800/40 hover:bg-sky-700/50 disabled:opacity-40 disabled:cursor-not-allowed text-sky-300 text-sm transition-colors"
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    Auto-dividir
+                  </button>
+                </div>
+                <div className="ml-auto flex gap-2">
+                  <button
+                    onClick={handleResetSections}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Resetar
+                  </button>
+                  {workingGroups.length > 0 && (
+                    <>
+                      <button
+                        onClick={() => {
+                          const list = workingGroups
+                            .map((g) => getDisplayLabel(workingGroups, g))
+                            .join("\n");
+                          navigator.clipboard.writeText(list);
+                          showToast("Seções copiadas!", "success");
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        Copiar lista
+                      </button>
+                      <button
+                        onClick={() => {
+                          const numbered = workingGroups
+                            .map((g, i) => `${i + 1}. ${getDisplayLabel(workingGroups, g)}`)
+                            .join("\n");
+                          navigator.clipboard.writeText(numbered);
+                          showToast("Lista numerada copiada!", "success");
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                      >
+                        <List className="w-3.5 h-3.5" />
+                        Copiar numerado
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Section list */}
+              {workingGroups.length > 0 ? (
+                <div className="space-y-1.5">
+                  {workingGroups.map((group, idx) => {
+                    const label = getDisplayLabel(workingGroups, group);
+                    const qCount = group.questions.length;
+                    const isOver = maxQPerSection > 0 && qCount > maxQPerSection;
+                    return (
+                      <div
+                        key={group.id}
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors ${
+                          isOver
+                            ? "bg-red-900/20 border-red-700/40"
+                            : "bg-gray-800/50 border-gray-700/40"
+                        }`}
+                      >
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full bg-sky-600/20 text-sky-400 text-xs flex items-center justify-center font-bold">
+                          {idx + 1}
+                        </span>
+                        <span className={`text-sm font-medium flex-1 ${
+                          isOver ? "text-red-300" : "text-gray-200"
+                        }`}>
+                          {label}
+                        </span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-mono flex-shrink-0 ${
+                          isOver
+                            ? "bg-red-800/50 text-red-300"
+                            : "bg-gray-700 text-gray-400"
+                        }`}>
+                          {qCount} {qCount === 1 ? "pergunta" : "perguntas"}
+                        </span>
+                        <div className="flex gap-1 flex-shrink-0">
+                          {qCount >= 2 && (
+                            <button
+                              onClick={() => handleSplit(idx)}
+                              className="px-2 py-1 rounded bg-amber-800/30 hover:bg-amber-700/40 text-amber-300 text-xs transition-colors"
+                              title="Dividir ao meio"
+                            >
+                              ÷ Dividir
+                            </button>
+                          )}
+                          {idx < workingGroups.length - 1 && (
+                            <button
+                              onClick={() => handleJoin(idx)}
+                              className="px-2 py-1 rounded bg-sky-800/30 hover:bg-sky-700/40 text-sky-300 text-xs transition-colors"
+                              title="Unir com a próxima seção"
+                            >
+                              + Unir
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(label);
+                              showToast("Copiado!", "success");
+                            }}
+                            className="p-1.5 rounded bg-gray-700/50 hover:bg-gray-600/50 text-gray-400 text-xs transition-colors"
+                            title="Copiar"
+                          >
+                            <Copy className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center gap-3 py-12 text-gray-500">
+                  <Tag className="w-8 h-8 opacity-40" />
+                  <p className="text-sm">Nenhuma seção detectada no texto corrigido.</p>
+                  <p className="text-xs text-gray-600 text-center max-w-xs">
+                    As seções são detectadas automaticamente quando o texto contém títulos numerados em maiúsculas, como &quot;1 NOME DA SEÇÃO&quot;.
                   </p>
                 </div>
               )}

@@ -6,6 +6,30 @@ import type { CorrectionOptions, AIProvider } from "@/lib/types";
 const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"];
 const OPENAI_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"];
 
+const RETRYABLE_CODES = [503, 529];
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 5000;
+
+async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      const isRetryable = RETRYABLE_CODES.some((code) =>
+        msg.includes(`[${code}`)
+      );
+      if (!isRetryable || attempt === MAX_RETRIES) throw err;
+      const delay = BASE_DELAY_MS * attempt;
+      console.warn(`Tentativa ${attempt} falhou (retryable). Aguardando ${delay}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError;
+}
+
 function detectProvider(model: string): AIProvider {
   if (GEMINI_MODELS.includes(model)) return "gemini";
   if (OPENAI_MODELS.includes(model)) return "openai";
@@ -238,12 +262,12 @@ export async function POST(request: NextRequest) {
     let correctedText: string;
 
     if (provider === "gemini") {
-      correctedText = await callGemini(
-        apiKey, model, systemPrompt, userPrompt, images
+      correctedText = await withRetry(() =>
+        callGemini(apiKey, model, systemPrompt, userPrompt, images)
       );
     } else {
-      correctedText = await callOpenAI(
-        apiKey, model, systemPrompt, userPrompt, images
+      correctedText = await withRetry(() =>
+        callOpenAI(apiKey, model, systemPrompt, userPrompt, images)
       );
     }
 
