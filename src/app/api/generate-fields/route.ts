@@ -41,7 +41,7 @@ function detectProvider(model: string): AIProvider {
   return "gemini";
 }
 
-const SYSTEM_PROMPT = `Você receberá uma lista de itens/perguntas de um checklist de entrega de veículos.
+const BASE_PROMPT_BODY = `Você receberá uma lista de itens/perguntas de um checklist de entrega de veículos.
 
 SUA TAREFA:
 Para cada item de checklist (NÃO para títulos de seção), gere um nome de campo no formato snake_case.
@@ -60,7 +60,10 @@ REGRAS OBRIGATÓRIAS para o nome do campo (coluna "campo"):
 O QUE IGNORAR:
 - Linhas que são títulos de seção (ex: "1 INFORMAÇÃO TÉCNICA | DOCUMENTOS E MANUAIS STATUS")
 - Linhas vazias
-- Separadores como "--- Página ---"
+- Separadores como "--- Página ---"`;
+
+// Gemini aceita array direto; OpenAI com json_object EXIGE um objeto wrapper.
+const SYSTEM_PROMPT = BASE_PROMPT_BODY + `
 
 FORMATO DE SAÍDA:
 Retorne APENAS um JSON válido (array), sem explicações, sem markdown, sem código de bloco:
@@ -68,6 +71,15 @@ Retorne APENAS um JSON válido (array), sem explicações, sem markdown, sem có
   {"campo": "nome_do_campo", "pergunta": "Texto completo do item de checklist"},
   ...
 ]`;
+
+const OPENAI_SYSTEM_PROMPT = BASE_PROMPT_BODY + `
+
+FORMATO DE SAÍDA OBRIGATÓRIO:
+Retorne APENAS um objeto JSON no formato {"fields": [...]}, sem explicações ou markdown:
+{"fields": [
+  {"campo": "nome_do_campo", "pergunta": "Texto completo do item de checklist"},
+  ...
+]}`;
 
 async function callGemini(
   apiKey: string,
@@ -92,18 +104,18 @@ async function callOpenAI(
   const response = await openai.chat.completions.create({
     model,
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: OPENAI_SYSTEM_PROMPT },
       {
         role: "user",
-        content: `Texto do checklist corrigido:\n\n${text}\n\nRetorne o JSON agora:`,
+        content: `Texto do checklist corrigido:\n\n${text}\n\nRetorne o objeto JSON {"fields": [...]} agora:`,
       },
     ],
-    max_tokens: 8192,
+    max_tokens: 16384,
     temperature: 0.1,
     response_format: { type: "json_object" },
   });
 
-  return response.choices[0]?.message?.content ?? "[]";
+  return response.choices[0]?.message?.content ?? "{\"fields\": []}";
 }
 
 function parseFields(raw: string): MigrationField[] {
@@ -116,13 +128,18 @@ function parseFields(raw: string): MigrationField[] {
   const parsed = JSON.parse(cleaned);
 
   // Handle both array and {fields: [...]} shapes
-  const arr: unknown[] = Array.isArray(parsed)
-    ? parsed
-    : Array.isArray(parsed.fields)
-    ? parsed.fields
-    : Array.isArray(parsed.items)
-    ? parsed.items
-    : [];
+  let arr: unknown[];
+  if (Array.isArray(parsed)) {
+    arr = parsed;
+  } else if (typeof parsed === "object" && parsed !== null) {
+    // Handles qualquer chave wrapper: {"fields": []}, {"items": []}, {"data": []}, etc.
+    const firstArray = Object.values(parsed as Record<string, unknown>).find(
+      (v) => Array.isArray(v)
+    );
+    arr = (firstArray as unknown[]) ?? [];
+  } else {
+    arr = [];
+  }
 
   return arr
     .filter(

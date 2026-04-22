@@ -45,9 +45,16 @@ function buildSystemPrompt(options: CorrectionOptions, project?: string): string
       "SUA TAREFA:\n" +
       "Retorne APENAS os títulos de seção e os itens do checklist, limpos e organizados.\n\n" +
       "REGRAS OBRIGATÓRIAS:\n" +
-      "- IGNORE completamente: cabeçalhos como 'CHECKLIST ROTEIRO DE ENTREGA', nome do modelo do veículo, 'DADOS DA ENTREGA', 'CHASSI', 'PLACA', 'CLIENTE', 'MODELO', 'ANO', 'DATA', 'LEGENDA', 'TIPO DE ENTREGA', 'LOCAL DA ENTREGA', placeholders de data (ex: '/ / :'), linhas com '( ) Completa', '( ) Compacta' e similares.\n" +
+      "- IGNORE completamente apenas estas linhas de metadados do documento:\n" +
+      "  • Título do documento: 'CHECKLIST ROTEIRO DE ENTREGA'\n" +
+      "  • Nome/código do modelo do veículo (ex: 'YARIS SEDAN 1.5 XLS CVT')\n" +
+      "  • Cabeçalhos de campos de dados: 'DADOS DA ENTREGA', 'CHASSI:', 'PLACA:', 'CLIENTE:', 'MODELO:', 'ANO/MOD:', 'DATA:'\n" +
+      "  • Seção de legenda e seus itens de status (ex: 'LEGENDA', 'A - APLICÁVEL', 'N - NÃO APLICÁVEL')\n" +
+      "  • Opções de tipo de checklist: 'TIPO DE ENTREGA:', 'LOCAL DA ENTREGA:', '( ) Completa', '( ) Compacta'\n" +
+      "  • Placeholders vazios de data/hora (ex: '/ / :', '__/__/____')\n" +
+      "- NUNCA ignore itens que descrevem ações, verificações ou explicações — mesmo que sejam curtos ou simples.\n" +
       "- MANTENHA os títulos de seção numerados que terminam com STATUS. Exemplo: '1 INFORMAÇÃO TÉCNICA | DOCUMENTOS E MANUAIS STATUS'\n" +
-      "- MANTENHA todos os itens do checklist (frases que descrevem ações a serem realizadas).\n" +
+      "- MANTENHA absolutamente TODOS os itens do checklist (frases que descrevem ações a serem realizadas).\n" +
       "- REMOVA todos os símbolos do início de cada item: ●, ★, |, •, -, *, e qualquer combinação deles.\n" +
       "- Cada item deve aparecer em uma linha separada, sem símbolos, sem numeração própria.\n" +
       "- NÃO adicione explicações, comentários, cabeçalhos extras ou formatação markdown.\n" +

@@ -8,12 +8,15 @@ import {
   Download,
   ArrowLeftRight,
   Loader2,
-  FileText,
   Table2,
   RefreshCw,
   FileCode,
   List,
   Tag,
+  ChevronUp,
+  ChevronDown,
+  Plus,
+  Pencil,
 } from "lucide-react";
 import { showToast } from "@/components/ui/toast";
 import { AI_MODELS, type UploadedImage } from "@/lib/types";
@@ -34,7 +37,7 @@ interface Props {
   onOpenApiKeyModal: () => void;
 }
 
-type ProcessingStep = "extracting" | "correcting" | "generating-fields" | null;
+type ProcessingStep = "extracting" | "correcting" | null;
 type ResultTab = "corrected" | "fields" | "sections";
 
 export function AiCorrectionStep({
@@ -59,8 +62,11 @@ export function AiCorrectionStep({
   const [workingGroups, setWorkingGroups] = useState<WorkingGroup[]>([]);
   const [maxQPerSection, setMaxQPerSection] = useState<number>(0);
   const [checklistId, setChecklistId] = useState("217");
+  const [isGeneratingFields, setIsGeneratingFields] = useState(false);
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [editingName, setEditingName] = useState("");
 
-  const isProcessing = processingStep !== null;
+  const isProcessing = processingStep !== null || isGeneratingFields;
 
   const getApiKey = useCallback((): string | null => {
     if (typeof window === "undefined") return null;
@@ -101,7 +107,7 @@ export function AiCorrectionStep({
 
   const generateFields = useCallback(
     async (text: string, apiKey: string) => {
-      setProcessingStep("generating-fields");
+      setIsGeneratingFields(true);
       try {
         const res = await fetch("/api/generate-fields", {
           method: "POST",
@@ -114,13 +120,14 @@ export function AiCorrectionStep({
           setActiveTab("fields");
           showToast(`${data.fields.length} campos de migration gerados!`, "success");
         } else {
+          console.error("[generate-fields] Erro da API:", data.error);
           showToast("Erro ao gerar campos: " + data.error, "error");
         }
       } catch (err) {
-        console.error(err);
+        console.error("[generate-fields] Erro inesperado:", err);
         showToast("Erro ao gerar campos de migration", "error");
       } finally {
-        setProcessingStep(null);
+        setIsGeneratingFields(false);
       }
     },
     [model]
@@ -317,6 +324,39 @@ export function AiCorrectionStep({
     setWorkingGroups(secs.map((s) => ({ id: s.id, baseLabel: s.name, questions: s.questions })));
   }
 
+  function handleRenameGroup(idx: number, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setWorkingGroups((prev) =>
+      prev.map((g, i) => (i === idx ? { ...g, baseLabel: trimmed } : g))
+    );
+  }
+
+  function handleMoveUp(idx: number) {
+    if (idx === 0) return;
+    setWorkingGroups((prev) => {
+      const result = [...prev];
+      [result[idx - 1], result[idx]] = [result[idx], result[idx - 1]];
+      return result;
+    });
+  }
+
+  function handleMoveDown(idx: number) {
+    setWorkingGroups((prev) => {
+      if (idx >= prev.length - 1) return prev;
+      const result = [...prev];
+      [result[idx], result[idx + 1]] = [result[idx + 1], result[idx]];
+      return result;
+    });
+  }
+
+  function handleAddGroup() {
+    setWorkingGroups((prev) => [
+      ...prev,
+      { id: `manual-${Date.now()}`, baseLabel: "Nova Seção", questions: [] },
+    ]);
+  }
+
   // Sync workingGroups when correctedText changes
   useEffect(() => {
     if (!correctedText) { setWorkingGroups([]); return; }
@@ -324,6 +364,19 @@ export function AiCorrectionStep({
     setWorkingGroups(secs.map((s) => ({ id: s.id, baseLabel: s.name, questions: s.questions })));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [correctedText]);
+
+  // Atualiza título da aba do navegador conforme estado
+  useEffect(() => {
+    const step = isGeneratingFields
+      ? "generating"
+      : processingStep;
+    if (step === "extracting") document.title = "⏳ Extraindo PDF...";
+    else if (step === "correcting") document.title = "⏳ Corrigindo texto...";
+    else if (step === "generating") document.title = "⏳ Gerando campos...";
+    else if (correctedText) document.title = "✅ Pronto! — Checklist Tools";
+    else document.title = "Checklist Tools";
+    return () => { document.title = "Checklist Tools"; };
+  }, [processingStep, isGeneratingFields, correctedText]);
 
   function buildMigrationCode(tableName: string, fields: MigrationField[]): string {
     const safeTable = tableName.trim() || "tabela_generica";
@@ -467,20 +520,16 @@ ${cols}
           disabled={!canRun}
           className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 disabled:from-gray-700 disabled:to-gray-700 disabled:text-gray-400 font-medium transition-all"
         >
-          {isProcessing ? (
+          {processingStep !== null ? (
             <Loader2 className="w-4 h-4 animate-spin" />
           ) : (
             <Sparkles className="w-4 h-4" />
           )}
-          {isProcessing ? (
-            processingStep === "extracting"
-              ? "Extraindo PDF..."
-              : processingStep === "generating-fields"
-              ? "Gerando campos..."
-              : "Corrigindo com IA..."
-          ) : (
-            "Corrigir com IA"
-          )}
+          {processingStep === "extracting"
+            ? "Extraindo PDF..."
+            : processingStep === "correcting"
+            ? "Corrigindo com IA..."
+            : "Corrigir com IA"}
         </button>
 
         {hasPages && (
@@ -494,17 +543,57 @@ ${cols}
           </button>
         )}
 
-        {isProcessing && (
-          <span className="flex items-center gap-2 text-sm text-gray-400">
-            <FileText className="w-4 h-4" />
-            {processingStep === "extracting"
-              ? "Lendo o PDF..."
-              : processingStep === "generating-fields"
-              ? "Gerando campos de migration..."
-              : "Enviando para a IA..."}
-          </span>
+        {correctedText && !isProcessing && (
+          <button
+            onClick={() => {
+              const apiKey = getApiKey();
+              if (!apiKey) {
+                showToast("Configure sua API Key primeiro.", "error");
+                onOpenApiKeyModal();
+                return;
+              }
+              generateFields(correctedText, apiKey);
+            }}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-900/40 hover:bg-emerald-800/50 text-emerald-300 text-sm font-medium transition-colors border border-emerald-700/30"
+          >
+            {isGeneratingFields ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Table2 className="w-4 h-4" />
+            )}
+            {isGeneratingFields ? "Gerando campos..." : "Gerar Campos"}
+          </button>
         )}
       </div>
+
+      {/* Progress bar */}
+      {isProcessing && (
+        <div className="space-y-2">
+          <div className="flex justify-between text-xs text-gray-500">
+            {[
+              { label: "Extrair PDF", active: processingStep === "extracting" },
+              { label: "Corrigir texto", active: processingStep === "correcting" },
+              { label: "Gerar campos", active: isGeneratingFields },
+            ].map((s) => (
+              <span key={s.label} className={s.active ? "text-violet-400 font-medium" : ""}>
+                {s.label}
+              </span>
+            ))}
+          </div>
+          <div className="w-full bg-gray-800 rounded-full h-1.5 overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-violet-600 to-purple-400 rounded-full transition-all duration-700 ease-in-out"
+              style={{
+                width: isGeneratingFields
+                  ? "90%"
+                  : processingStep === "correcting"
+                  ? "60%"
+                  : "25%",
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Result Tabs */}
       {(correctedText || migrationFields.length > 0) && (
@@ -643,7 +732,7 @@ ${cols}
                       disabled={isProcessing}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-sm transition-colors"
                     >
-                      {processingStep === "generating-fields" ? (
+                      {isGeneratingFields ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
                       ) : (
                         <RefreshCw className="w-3.5 h-3.5" />
@@ -707,7 +796,7 @@ ${cols}
                 </div>
               </div>
 
-              {processingStep === "generating-fields" ? (
+              {isGeneratingFields ? (
                 <div className="flex items-center justify-center gap-3 py-12 text-gray-400">
                   <Loader2 className="w-5 h-5 animate-spin" />
                   <span className="text-sm">Gerando campos com IA...</span>
@@ -814,6 +903,13 @@ ${cols}
                     <Layers className="w-3.5 h-3.5" />
                     Auto-dividir
                   </button>
+                  <button
+                    onClick={handleAddGroup}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-800/40 hover:bg-sky-700/50 text-sky-300 text-sm transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Nova Seção
+                  </button>
                 </div>
                 <div className="ml-auto flex gap-2">
                   <button
@@ -863,23 +959,59 @@ ${cols}
                     const label = getDisplayLabel(workingGroups, group);
                     const qCount = group.questions.length;
                     const isOver = maxQPerSection > 0 && qCount > maxQPerSection;
+                    const isEditing = editingIdx === idx;
                     return (
                       <div
                         key={group.id}
-                        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors ${
+                        className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border transition-colors ${
                           isOver
                             ? "bg-red-900/20 border-red-700/40"
                             : "bg-gray-800/50 border-gray-700/40"
                         }`}
                       >
+                        {/* Número */}
                         <span className="flex-shrink-0 w-6 h-6 rounded-full bg-sky-600/20 text-sky-400 text-xs flex items-center justify-center font-bold">
                           {idx + 1}
                         </span>
-                        <span className={`text-sm font-medium flex-1 ${
-                          isOver ? "text-red-300" : "text-gray-200"
-                        }`}>
-                          {label}
-                        </span>
+
+                        {/* Label / Input de edição */}
+                        {isEditing ? (
+                          <input
+                            autoFocus
+                            type="text"
+                            value={editingName}
+                            onChange={(e) => setEditingName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                handleRenameGroup(idx, editingName);
+                                setEditingIdx(null);
+                              } else if (e.key === "Escape") {
+                                setEditingIdx(null);
+                              }
+                            }}
+                            onBlur={() => {
+                              handleRenameGroup(idx, editingName);
+                              setEditingIdx(null);
+                            }}
+                            className="flex-1 bg-gray-700 border border-sky-500/60 rounded px-2 py-0.5 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-sky-400"
+                          />
+                        ) : (
+                          <span
+                            onClick={() => {
+                              setEditingIdx(idx);
+                              setEditingName(group.baseLabel);
+                            }}
+                            className={`text-sm font-medium flex-1 cursor-pointer hover:text-white transition-colors group flex items-center gap-1 ${
+                              isOver ? "text-red-300" : "text-gray-200"
+                            }`}
+                            title="Clique para editar o nome"
+                          >
+                            {label}
+                            <Pencil className="w-2.5 h-2.5 opacity-0 group-hover:opacity-40 transition-opacity" />
+                          </span>
+                        )}
+
+                        {/* Contagem de perguntas */}
                         <span className={`text-xs px-2 py-0.5 rounded-full font-mono flex-shrink-0 ${
                           isOver
                             ? "bg-red-800/50 text-red-300"
@@ -887,7 +1019,28 @@ ${cols}
                         }`}>
                           {qCount} {qCount === 1 ? "pergunta" : "perguntas"}
                         </span>
-                        <div className="flex gap-1 flex-shrink-0">
+
+                        {/* Botões de ação */}
+                        <div className="flex gap-1 flex-shrink-0 items-center">
+                          {/* Mover */}
+                          <button
+                            onClick={() => handleMoveUp(idx)}
+                            disabled={idx === 0}
+                            className="p-1 rounded bg-gray-700/50 hover:bg-gray-600/50 disabled:opacity-25 disabled:cursor-not-allowed text-gray-400 transition-colors"
+                            title="Mover para cima"
+                          >
+                            <ChevronUp className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={() => handleMoveDown(idx)}
+                            disabled={idx === workingGroups.length - 1}
+                            className="p-1 rounded bg-gray-700/50 hover:bg-gray-600/50 disabled:opacity-25 disabled:cursor-not-allowed text-gray-400 transition-colors"
+                            title="Mover para baixo"
+                          >
+                            <ChevronDown className="w-3 h-3" />
+                          </button>
+
+                          {/* Dividir / Unir */}
                           {qCount >= 2 && (
                             <button
                               onClick={() => handleSplit(idx)}
@@ -906,13 +1059,15 @@ ${cols}
                               + Unir
                             </button>
                           )}
+
+                          {/* Copiar */}
                           <button
                             onClick={() => {
                               navigator.clipboard.writeText(label);
                               showToast("Copiado!", "success");
                             }}
-                            className="p-1.5 rounded bg-gray-700/50 hover:bg-gray-600/50 text-gray-400 text-xs transition-colors"
-                            title="Copiar"
+                            className="p-1.5 rounded bg-gray-700/50 hover:bg-gray-600/50 text-gray-400 transition-colors"
+                            title="Copiar nome"
                           >
                             <Copy className="w-3 h-3" />
                           </button>
