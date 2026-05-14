@@ -27,9 +27,9 @@ const icons = {
 };
 
 const colors = {
-  success: "bg-green-600",
-  error: "bg-red-600",
-  info: "bg-blue-600",
+  success: "bg-[#0BB783]",
+  error: "bg-[#F64E60]",
+  info: "bg-[#22B9FF]",
 };
 
 export function ToastContainer() {
@@ -55,7 +55,7 @@ export function ToastContainer() {
         <div
           key={t.id}
           className={cn(
-            "flex items-center gap-2 px-4 py-3 rounded-lg text-white shadow-lg text-sm animate-slide-in",
+            "flex items-center gap-2 px-4 py-3 rounded-lg text-white shadow-lg text-sm animate-slide-in-right",
             colors[t.type]
           )}
         >

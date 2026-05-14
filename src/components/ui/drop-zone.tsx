@@ -69,15 +69,15 @@ export function DropZone({
       className={cn(
         "border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-200",
         isDragging
-          ? "border-violet-400 bg-violet-500/10"
-          : "border-gray-600 hover:border-gray-400 bg-gray-800/50",
+          ? "border-[#173872] bg-[#173872]/5"
+          : "border-[#d0d0d0] hover:border-[#173872]/50 bg-[#F9F9F9]",
         disabled && "opacity-50 cursor-not-allowed",
         className
       )}
     >
-      <div className="text-4xl mb-3 text-gray-400">{icon}</div>
-      <p className="text-gray-300 font-medium">{label}</p>
-      {hint && <p className="text-gray-500 text-sm mt-1">{hint}</p>}
+      <div className="text-4xl mb-3 text-[#80808F]">{icon}</div>
+      <p className="text-[#464E5F] font-medium">{label}</p>
+      {hint && <p className="text-[#80808F]/70 text-sm mt-1">{hint}</p>}
     </div>
   );
 }

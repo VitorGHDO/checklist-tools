@@ -1,24 +1,35 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+  --camp-navy: #173872;
+  --camp-navy-dark: #143266;
+  --camp-red: #ED3237;
+  --camp-red-hover: #A5232D;
+  --camp-bg: #e6e6e6;
+  --camp-bg-card: #ffffff;
+  --camp-bg-subtle: #F9F9F9;
+  --camp-success: #0BB783;
+  --camp-info: #22B9FF;
+  --camp-warning: #FFB822;
+  --camp-error: #F64E60;
+  --camp-text: #464E5F;
+  --camp-text-muted: #80808F;
+  --background: var(--camp-bg);
+  --foreground: var(--camp-text);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-poppins);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), Helvetica, sans-serif;
 }
 
-/* Toast slide-in animation */
 @keyframes slide-in-right {
   from {
     transform: translateX(100%);

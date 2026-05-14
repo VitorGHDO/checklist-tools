@@ -1,7 +1,16 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { FileText, Sparkles, ArrowLeft, Key, Truck, ShoppingBag, Construction, FolderOpen } from "lucide-react";
+import {
+  FileText,
+  Sparkles,
+  ArrowLeft,
+  Key,
+  Truck,
+  ShoppingBag,
+  Construction,
+  FolderOpen,
+} from "lucide-react";
 import Link from "next/link";
 import { FilesUploadStep } from "./components/files-upload-step";
 import { AiCorrectionStep } from "./components/ai-correction-step";
@@ -43,24 +52,30 @@ export default function ExtratorPage() {
   const selectedProjectData = PROJECTS.find((p) => p.id === selectedProject);
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100">
-      <header className="sticky top-0 z-40 bg-gray-900/80 backdrop-blur-md border-b border-gray-800">
-        <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
+    <div className="min-h-screen bg-[#e6e6e6] text-[#464E5F]">
+      {/* Header */}
+      <header
+        className="sticky top-0 z-40 bg-white border-b border-[#e8e8e8]"
+        style={{ boxShadow: "0px 10px 30px 0px rgba(82,63,105,0.05)" }}
+      >
+        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link
               href="/"
-              className="p-2 rounded-lg hover:bg-gray-800 transition-colors"
+              className="p-2 rounded-lg hover:bg-[#F9F9F9] transition-colors text-[#80808F] hover:text-[#464E5F]"
             >
               <ArrowLeft className="w-5 h-5" />
             </Link>
-            <FileText className="w-5 h-5 text-violet-400" />
-            <h1 className="text-lg font-semibold">
+            <div className="w-7 h-7 bg-[#173872] rounded-lg flex items-center justify-center">
+              <FileText className="w-4 h-4 text-white" />
+            </div>
+            <h1 className="text-base font-semibold text-[#173872]">
               Extrator e Corretor de Texto
             </h1>
             {selectedProjectData && (
               <>
-                <span className="text-gray-600">/</span>
-                <span className="text-sm text-violet-300 font-medium">
+                <span className="text-[#d0d0d0]">/</span>
+                <span className="text-sm text-[#ED3237] font-medium">
                   {selectedProjectData.name}
                 </span>
               </>
@@ -68,7 +83,7 @@ export default function ExtratorPage() {
           </div>
           <button
             onClick={() => setShowApiModal(true)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors text-sm"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#173872]/30 hover:border-[#173872] text-[#173872] hover:bg-[#173872]/5 transition-all text-sm font-medium"
           >
             <Key className="w-4 h-4" />
             API Key
@@ -76,18 +91,23 @@ export default function ExtratorPage() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-8 space-y-8">
+      <main className="max-w-6xl mx-auto px-4 py-8 space-y-6">
         {/* Step 1 — Selecionar Projeto */}
-        <section className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
-          <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-800">
+        <section
+          className="bg-white rounded-xl border border-[#e8e8e8] overflow-hidden"
+          style={{ boxShadow: "0px 0px 20px 0px rgba(76,87,125,0.04)" }}
+        >
+          <div className="flex items-center gap-3 px-6 py-4 border-b border-[#e8e8e8]">
             <span
-              className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
-                selectedProject ? "bg-green-600" : "bg-violet-600"
+              className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white ${
+                selectedProject ? "bg-[#0BB783]" : "bg-[#ED3237]"
               }`}
             >
               {selectedProject ? "✓" : "1"}
             </span>
-            <h2 className="text-lg font-semibold">Selecionar Projeto</h2>
+            <h2 className="text-base font-semibold text-[#464E5F]">
+              Selecionar Projeto
+            </h2>
           </div>
           <div className="p-6">
             <div className="grid sm:grid-cols-2 gap-4">
@@ -97,29 +117,41 @@ export default function ExtratorPage() {
                 return (
                   <button
                     key={project.id}
-                    onClick={() => project.available && handleSelectProject(project.id)}
+                    onClick={() =>
+                      project.available && handleSelectProject(project.id)
+                    }
                     disabled={!project.available}
                     className={`relative text-left p-5 rounded-xl border-2 transition-all ${
                       !project.available
-                        ? "border-gray-700 opacity-50 cursor-not-allowed"
+                        ? "border-[#e8e8e8] bg-[#F9F9F9] opacity-50 cursor-not-allowed"
                         : isSelected
-                        ? "border-violet-500 bg-violet-500/10"
-                        : "border-gray-700 hover:border-gray-600 hover:bg-gray-800/50 cursor-pointer"
+                        ? "border-[#ED3237] bg-[#ED3237]/5"
+                        : "border-[#e8e8e8] hover:border-[#ED3237]/40 hover:bg-[#F9F9F9] cursor-pointer"
                     }`}
                   >
                     {!project.available && (
-                      <span className="absolute top-3 right-3 flex items-center gap-1 text-xs text-yellow-400 bg-yellow-400/10 px-2 py-0.5 rounded-full border border-yellow-400/20">
+                      <span className="absolute top-3 right-3 flex items-center gap-1 text-xs text-[#FFB822] bg-[#FFB822]/10 px-2 py-0.5 rounded-full border border-[#FFB822]/30">
                         <Construction className="w-3 h-3" />
                         Em desenvolvimento
                       </span>
                     )}
                     <div className="flex items-center gap-3 mb-2">
-                      <div className={`p-2 rounded-lg ${isSelected ? "bg-violet-600" : "bg-gray-800"}`}>
+                      <div
+                        className={`p-2 rounded-lg ${
+                          isSelected
+                            ? "bg-[#ED3237] text-white"
+                            : "bg-[#F9F9F9] text-[#80808F]"
+                        }`}
+                      >
                         <Icon className="w-5 h-5" />
                       </div>
-                      <span className="font-semibold">{project.name}</span>
+                      <span className="font-semibold text-sm text-[#464E5F]">
+                        {project.name}
+                      </span>
                     </div>
-                    <p className="text-sm text-gray-400">{project.description}</p>
+                    <p className="text-sm text-[#80808F]">
+                      {project.description}
+                    </p>
                   </button>
                 );
               })}
@@ -130,17 +162,22 @@ export default function ExtratorPage() {
         {selectedProject === "entrega-impecavel" && (
           <>
             {/* Step 2 — PDF + Imagens */}
-            <section className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
-              <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-800">
+            <section
+              className="bg-white rounded-xl border border-[#e8e8e8] overflow-hidden"
+              style={{ boxShadow: "0px 0px 20px 0px rgba(76,87,125,0.04)" }}
+            >
+              <div className="flex items-center gap-3 px-6 py-4 border-b border-[#e8e8e8]">
                 <span
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
-                    pdfFile && images.length > 0 ? "bg-green-600" : "bg-violet-600"
+                  className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white ${
+                    pdfFile && images.length > 0
+                      ? "bg-[#0BB783]"
+                      : "bg-[#ED3237]"
                   }`}
                 >
                   {pdfFile && images.length > 0 ? "✓" : "2"}
                 </span>
-                <h2 className="text-lg font-semibold flex items-center gap-2">
-                  <FolderOpen className="w-5 h-5 text-violet-400" />
+                <h2 className="text-base font-semibold text-[#464E5F] flex items-center gap-2">
+                  <FolderOpen className="w-5 h-5 text-[#173872]" />
                   Arquivos do Projeto
                 </h2>
               </div>
@@ -155,13 +192,16 @@ export default function ExtratorPage() {
             </section>
 
             {/* Step 3 — IA */}
-            <section className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
-              <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-800">
-                <span className="w-8 h-8 rounded-full bg-violet-600 flex items-center justify-center text-sm font-bold">
+            <section
+              className="bg-white rounded-xl border border-[#e8e8e8] overflow-hidden"
+              style={{ boxShadow: "0px 0px 20px 0px rgba(76,87,125,0.04)" }}
+            >
+              <div className="flex items-center gap-3 px-6 py-4 border-b border-[#e8e8e8]">
+                <span className="w-8 h-8 rounded-full bg-[#ED3237] flex items-center justify-center text-sm font-bold text-white">
                   3
                 </span>
-                <h2 className="text-lg font-semibold flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-violet-400" />
+                <h2 className="text-base font-semibold text-[#464E5F] flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-[#173872]" />
                   Corrigir com IA
                 </h2>
               </div>
@@ -186,5 +226,3 @@ export default function ExtratorPage() {
     </div>
   );
 }
-
-

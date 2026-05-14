@@ -89,7 +89,7 @@ export function AiCorrectionStep({
     const res = await fetch("/api/extract-pdf", {
       method: "POST",
       body: formData,
-    }); 
+    });
 
     const data = await res.json();
     if (!data.success) {
@@ -212,7 +212,6 @@ export function AiCorrectionStep({
           }
         }
 
-        // Automatically generate migration fields for entrega-impecavel
         if (finalText && project === "entrega-impecavel") {
           await generateFields(finalText, apiKey);
         }
@@ -357,7 +356,6 @@ export function AiCorrectionStep({
     ]);
   }
 
-  // Sync workingGroups when correctedText changes
   useEffect(() => {
     if (!correctedText) { setWorkingGroups([]); return; }
     const secs = parseSectionsFromText(correctedText);
@@ -365,11 +363,8 @@ export function AiCorrectionStep({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [correctedText]);
 
-  // Atualiza título da aba do navegador conforme estado
   useEffect(() => {
-    const step = isGeneratingFields
-      ? "generating"
-      : processingStep;
+    const step = isGeneratingFields ? "generating" : processingStep;
     if (step === "extracting") document.title = "⏳ Extraindo PDF...";
     else if (step === "correcting") document.title = "⏳ Corrigindo texto...";
     else if (step === "generating") document.title = "⏳ Gerando campos...";
@@ -446,11 +441,13 @@ ${cols}
       {/* Options */}
       <div className="grid sm:grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm text-gray-400 mb-1.5">Modelo</label>
+          <label className="block text-sm font-medium text-[#464E5F] mb-1.5">
+            Modelo
+          </label>
           <select
             value={model}
             onChange={(e) => setModel(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+            className="w-full bg-white border border-[#d0d0d0] rounded-lg px-3 py-2 text-sm text-[#464E5F] focus:outline-none focus:ring-2 focus:ring-[#173872]/30 focus:border-[#173872]/50 transition-colors"
           >
             <optgroup label="Google Gemini (gratuito)">
               {geminiModels.map((m) => (
@@ -470,7 +467,7 @@ ${cols}
         </div>
 
         <div>
-          <label className="block text-sm text-gray-400 mb-1.5">
+          <label className="block text-sm font-medium text-[#464E5F] mb-1.5">
             Instruções adicionais
           </label>
           <textarea
@@ -478,36 +475,36 @@ ${cols}
             onChange={(e) => setInstructions(e.target.value)}
             rows={2}
             placeholder="Ex: Manter formatação de tabela, preservar números..."
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+            className="w-full bg-white border border-[#d0d0d0] rounded-lg px-3 py-2 text-sm text-[#464E5F] resize-none focus:outline-none focus:ring-2 focus:ring-[#173872]/30 focus:border-[#173872]/50 transition-colors"
           />
         </div>
       </div>
 
       <div className="flex flex-wrap gap-x-6 gap-y-2">
-        <label className="flex items-center gap-2 text-sm cursor-pointer">
+        <label className="flex items-center gap-2 text-sm cursor-pointer text-[#464E5F]">
           <input
             type="checkbox"
             checked={keepFormat}
             onChange={(e) => setKeepFormat(e.target.checked)}
-            className="rounded bg-gray-700 border-gray-600 text-violet-500 focus:ring-violet-500"
+            className="rounded border-[#d0d0d0] text-[#ED3237] focus:ring-[#ED3237]/30"
           />
           Preservar formatação
         </label>
-        <label className="flex items-center gap-2 text-sm cursor-pointer">
+        <label className="flex items-center gap-2 text-sm cursor-pointer text-[#464E5F]">
           <input
             type="checkbox"
             checked={fixOrtho}
             onChange={(e) => setFixOrtho(e.target.checked)}
-            className="rounded bg-gray-700 border-gray-600 text-violet-500 focus:ring-violet-500"
+            className="rounded border-[#d0d0d0] text-[#ED3237] focus:ring-[#ED3237]/30"
           />
           Corrigir ortografia
         </label>
-        <label className="flex items-center gap-2 text-sm cursor-pointer">
+        <label className="flex items-center gap-2 text-sm cursor-pointer text-[#464E5F]">
           <input
             type="checkbox"
             checked={matchImage}
             onChange={(e) => setMatchImage(e.target.checked)}
-            className="rounded bg-gray-700 border-gray-600 text-violet-500 focus:ring-violet-500"
+            className="rounded border-[#d0d0d0] text-[#ED3237] focus:ring-[#ED3237]/30"
           />
           Coincidir com imagens
         </label>
@@ -518,7 +515,7 @@ ${cols}
         <button
           onClick={() => correctText(false)}
           disabled={!canRun}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 disabled:from-gray-700 disabled:to-gray-700 disabled:text-gray-400 font-medium transition-all"
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#ED3237] hover:bg-[#A5232D] disabled:bg-[#d0d0d0] disabled:text-[#80808F] text-white font-medium transition-all"
         >
           {processingStep !== null ? (
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -536,7 +533,7 @@ ${cols}
           <button
             onClick={() => correctText(true)}
             disabled={!canRun}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800 disabled:text-gray-500 text-sm transition-colors"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] disabled:opacity-50 text-[#464E5F] text-sm transition-colors"
           >
             <Layers className="w-4 h-4" />
             Corrigir por Página
@@ -554,7 +551,7 @@ ${cols}
               }
               generateFields(correctedText, apiKey);
             }}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-900/40 hover:bg-emerald-800/50 text-emerald-300 text-sm font-medium transition-colors border border-emerald-700/30"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#0BB783]/10 hover:bg-[#0BB783]/20 text-[#0BB783] text-sm font-medium transition-colors border border-[#0BB783]/30"
           >
             {isGeneratingFields ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -569,20 +566,20 @@ ${cols}
       {/* Progress bar */}
       {isProcessing && (
         <div className="space-y-2">
-          <div className="flex justify-between text-xs text-gray-500">
+          <div className="flex justify-between text-xs text-[#80808F]">
             {[
               { label: "Extrair PDF", active: processingStep === "extracting" },
               { label: "Corrigir texto", active: processingStep === "correcting" },
               { label: "Gerar campos", active: isGeneratingFields },
             ].map((s) => (
-              <span key={s.label} className={s.active ? "text-violet-400 font-medium" : ""}>
+              <span key={s.label} className={s.active ? "text-[#ED3237] font-medium" : ""}>
                 {s.label}
               </span>
             ))}
           </div>
-          <div className="w-full bg-gray-800 rounded-full h-1.5 overflow-hidden">
+          <div className="w-full bg-[#e8e8e8] rounded-full h-1.5 overflow-hidden">
             <div
-              className="h-full bg-gradient-to-r from-violet-600 to-purple-400 rounded-full transition-all duration-700 ease-in-out"
+              className="h-full bg-[#ED3237] rounded-full transition-all duration-700 ease-in-out"
               style={{
                 width: isGeneratingFields
                   ? "90%"
@@ -597,15 +594,15 @@ ${cols}
 
       {/* Result Tabs */}
       {(correctedText || migrationFields.length > 0) && (
-        <div className="pt-4 border-t border-gray-800 space-y-4">
+        <div className="pt-4 border-t border-[#e8e8e8] space-y-4">
           {/* Tab Bar */}
-          <div className="flex items-center gap-1 bg-gray-800/60 rounded-xl p-1 w-fit flex-wrap">
+          <div className="flex items-center gap-1 bg-[#F9F9F9] border border-[#e8e8e8] rounded-xl p-1 w-fit flex-wrap">
             <button
               onClick={() => setActiveTab("corrected")}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                 activeTab === "corrected"
-                  ? "bg-violet-600 text-white shadow"
-                  : "text-gray-400 hover:text-gray-200"
+                  ? "bg-[#ED3237] text-white shadow-sm"
+                  : "text-[#80808F] hover:text-[#464E5F]"
               }`}
             >
               <Sparkles className="w-4 h-4" />
@@ -620,8 +617,8 @@ ${cols}
               onClick={() => setActiveTab("fields")}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                 activeTab === "fields"
-                  ? "bg-emerald-600 text-white shadow"
-                  : "text-gray-400 hover:text-gray-200"
+                  ? "bg-[#0BB783] text-white shadow-sm"
+                  : "text-[#80808F] hover:text-[#464E5F]"
               }`}
             >
               <Table2 className="w-4 h-4" />
@@ -637,8 +634,8 @@ ${cols}
                 onClick={() => setActiveTab("sections")}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                   activeTab === "sections"
-                    ? "bg-sky-600 text-white shadow"
-                    : "text-gray-400 hover:text-gray-200"
+                    ? "bg-[#22B9FF] text-white shadow-sm"
+                    : "text-[#80808F] hover:text-[#464E5F]"
                 }`}
               >
                 <Tag className="w-4 h-4" />
@@ -654,7 +651,7 @@ ${cols}
           {activeTab === "corrected" && correctedText && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="font-medium text-green-400 flex items-center gap-2">
+                <h3 className="font-semibold text-[#0BB783] flex items-center gap-2">
                   <Sparkles className="w-4 h-4" />
                   Texto Corrigido
                 </h3>
@@ -664,7 +661,7 @@ ${cols}
                       navigator.clipboard.writeText(correctedText);
                       showToast("Texto corrigido copiado!", "success");
                     }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] text-[#464E5F] text-sm transition-colors"
                   >
                     <Copy className="w-3.5 h-3.5" />
                     Copiar
@@ -681,14 +678,14 @@ ${cols}
                       a.click();
                       URL.revokeObjectURL(url);
                     }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] text-[#464E5F] text-sm transition-colors"
                   >
                     <Download className="w-3.5 h-3.5" />
                     Baixar
                   </button>
                   <button
                     onClick={() => setShowDiff(!showDiff)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] text-[#464E5F] text-sm transition-colors"
                   >
                     <ArrowLeftRight className="w-3.5 h-3.5" />
                     Comparar
@@ -700,7 +697,7 @@ ${cols}
                 value={correctedText}
                 onChange={(e) => setCorrectedText(e.target.value)}
                 rows={12}
-                className="w-full bg-gray-800 border border-green-800/50 rounded-lg p-4 text-sm font-mono resize-y focus:outline-none focus:ring-2 focus:ring-green-500/50"
+                className="w-full bg-white border border-[#0BB783]/40 rounded-lg p-4 text-sm font-mono text-[#464E5F] resize-y focus:outline-none focus:ring-2 focus:ring-[#0BB783]/30 transition-colors"
               />
 
               {showDiff && (
@@ -713,7 +710,7 @@ ${cols}
           {activeTab === "fields" && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="font-medium text-emerald-400 flex items-center gap-2">
+                <h3 className="font-semibold text-[#0BB783] flex items-center gap-2">
                   <Table2 className="w-4 h-4" />
                   Campos de Migration
                 </h3>
@@ -730,7 +727,7 @@ ${cols}
                         generateFields(correctedText, apiKey);
                       }}
                       disabled={isProcessing}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-sm transition-colors"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] disabled:opacity-50 text-[#464E5F] text-sm transition-colors"
                     >
                       {isGeneratingFields ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -750,7 +747,7 @@ ${cols}
                           navigator.clipboard.writeText(campos);
                           showToast("Campos copiados!", "success");
                         }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] text-[#464E5F] text-sm transition-colors"
                       >
                         <List className="w-3.5 h-3.5" />
                         Copiar campos
@@ -768,7 +765,7 @@ ${cols}
                           navigator.clipboard.writeText(csv);
                           showToast("Tabela copiada (TSV)!", "success");
                         }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] text-[#464E5F] text-sm transition-colors"
                       >
                         <Copy className="w-3.5 h-3.5" />
                         Copiar TSV
@@ -786,7 +783,7 @@ ${cols}
                           a.click();
                           URL.revokeObjectURL(url);
                         }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] text-[#464E5F] text-sm transition-colors"
                       >
                         <Download className="w-3.5 h-3.5" />
                         Baixar JSON
@@ -797,21 +794,21 @@ ${cols}
               </div>
 
               {isGeneratingFields ? (
-                <div className="flex items-center justify-center gap-3 py-12 text-gray-400">
+                <div className="flex items-center justify-center gap-3 py-12 text-[#80808F]">
                   <Loader2 className="w-5 h-5 animate-spin" />
                   <span className="text-sm">Gerando campos com IA...</span>
                 </div>
               ) : migrationFields.length > 0 ? (
                 <div className="space-y-6">
                   {/* Tabela campo + pergunta */}
-                  <div className="overflow-auto rounded-lg border border-gray-700">
+                  <div className="overflow-auto rounded-lg border border-[#e0e0e0]">
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="bg-gray-800 border-b border-gray-700">
-                          <th className="text-left px-4 py-3 text-emerald-400 font-semibold w-56">
+                        <tr className="bg-[#F9F9F9] border-b border-[#e0e0e0]">
+                          <th className="text-left px-4 py-3 text-[#0BB783] font-semibold w-56">
                             campo
                           </th>
-                          <th className="text-left px-4 py-3 text-gray-300 font-semibold">
+                          <th className="text-left px-4 py-3 text-[#464E5F] font-semibold">
                             pergunta
                           </th>
                         </tr>
@@ -820,12 +817,12 @@ ${cols}
                         {migrationFields.map((field, idx) => (
                           <tr
                             key={idx}
-                            className="border-b border-gray-800 hover:bg-gray-800/50 transition-colors"
+                            className="border-b border-[#e8e8e8] hover:bg-[#F9F9F9] transition-colors"
                           >
-                            <td className="px-4 py-3 font-mono text-emerald-300 whitespace-nowrap">
+                            <td className="px-4 py-3 font-mono text-[#0BB783] whitespace-nowrap">
                               {field.campo}
                             </td>
-                            <td className="px-4 py-3 text-gray-300">
+                            <td className="px-4 py-3 text-[#464E5F]">
                               {field.pergunta}
                             </td>
                           </tr>
@@ -837,8 +834,8 @@ ${cols}
                   {/* Estrutura da Migration */}
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
-                        <FileCode className="w-4 h-4 text-orange-400" />
+                      <h4 className="text-sm font-semibold text-[#464E5F] flex items-center gap-2">
+                        <FileCode className="w-4 h-4 text-[#FFB822]" />
                         Estrutura da Migration (Laravel)
                       </h4>
                       <button
@@ -848,29 +845,31 @@ ${cols}
                           );
                           showToast("Migration copiada!", "success");
                         }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] text-[#464E5F] text-sm transition-colors"
                       >
                         <Copy className="w-3.5 h-3.5" />
                         Copiar
                       </button>
                     </div>
                     <div className="flex items-center gap-2">
-                      <label className="text-xs text-gray-400 whitespace-nowrap">Nome da tabela:</label>
+                      <label className="text-xs text-[#80808F] whitespace-nowrap">
+                        Nome da tabela:
+                      </label>
                       <input
                         type="text"
                         value={migrationTableName}
                         onChange={(e) => setMigrationTableName(e.target.value)}
                         placeholder="tabela_generica"
-                        className="flex-1 max-w-xs bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+                        className="flex-1 max-w-xs bg-white border border-[#d0d0d0] rounded-lg px-3 py-1.5 text-sm font-mono text-[#464E5F] focus:outline-none focus:ring-2 focus:ring-[#FFB822]/40 focus:border-[#FFB822]/50 transition-colors"
                       />
                     </div>
-                    <pre className="bg-gray-900 border border-gray-700 rounded-lg p-4 text-xs font-mono text-gray-300 overflow-auto max-h-96 whitespace-pre">
+                    <pre className="bg-[#F9F9F9] border border-[#e0e0e0] rounded-lg p-4 text-xs font-mono text-[#464E5F] overflow-auto max-h-96 whitespace-pre">
                       {buildMigrationCode(migrationTableName, migrationFields)}
                     </pre>
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-col items-center justify-center gap-3 py-12 text-gray-500">
+                <div className="flex flex-col items-center justify-center gap-3 py-12 text-[#80808F]">
                   <Table2 className="w-8 h-8 opacity-40" />
                   <p className="text-sm">
                     Nenhum campo gerado. Corrija o texto primeiro.
@@ -886,26 +885,28 @@ ${cols}
               {/* Toolbar */}
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex items-center gap-2">
-                  <label className="text-xs text-gray-400 whitespace-nowrap">Máx. perguntas por seção:</label>
+                  <label className="text-xs text-[#80808F] whitespace-nowrap">
+                    Máx. perguntas por seção:
+                  </label>
                   <input
                     type="number"
                     min={1}
                     value={maxQPerSection || ""}
                     onChange={(e) => setMaxQPerSection(Number(e.target.value))}
                     placeholder="manual"
-                    className="w-20 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-sky-500/50"
+                    className="w-20 bg-white border border-[#d0d0d0] rounded-lg px-2 py-1 text-sm text-center text-[#464E5F] focus:outline-none focus:ring-2 focus:ring-[#22B9FF]/40 transition-colors"
                   />
                   <button
                     onClick={() => handleAutoSplit(maxQPerSection)}
                     disabled={!maxQPerSection}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-800/40 hover:bg-sky-700/50 disabled:opacity-40 disabled:cursor-not-allowed text-sky-300 text-sm transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#22B9FF]/10 hover:bg-[#22B9FF]/20 disabled:opacity-40 disabled:cursor-not-allowed text-[#22B9FF] text-sm transition-colors"
                   >
                     <Layers className="w-3.5 h-3.5" />
                     Auto-dividir
                   </button>
                   <button
                     onClick={handleAddGroup}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-800/40 hover:bg-sky-700/50 text-sky-300 text-sm transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#22B9FF]/10 hover:bg-[#22B9FF]/20 text-[#22B9FF] text-sm transition-colors"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     Nova Seção
@@ -914,7 +915,7 @@ ${cols}
                 <div className="ml-auto flex gap-2">
                   <button
                     onClick={handleResetSections}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] text-[#464E5F] text-sm transition-colors"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
                     Resetar
@@ -929,7 +930,7 @@ ${cols}
                           navigator.clipboard.writeText(list);
                           showToast("Seções copiadas!", "success");
                         }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] text-[#464E5F] text-sm transition-colors"
                       >
                         <Copy className="w-3.5 h-3.5" />
                         Copiar lista
@@ -942,7 +943,7 @@ ${cols}
                           navigator.clipboard.writeText(numbered);
                           showToast("Lista numerada copiada!", "success");
                         }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] text-[#464E5F] text-sm transition-colors"
                       >
                         <List className="w-3.5 h-3.5" />
                         Copiar numerado
@@ -965,12 +966,12 @@ ${cols}
                         key={group.id}
                         className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border transition-colors ${
                           isOver
-                            ? "bg-red-900/20 border-red-700/40"
-                            : "bg-gray-800/50 border-gray-700/40"
+                            ? "bg-[#F64E60]/5 border-[#F64E60]/30"
+                            : "bg-[#F9F9F9] border-[#e8e8e8]"
                         }`}
                       >
                         {/* Número */}
-                        <span className="flex-shrink-0 w-6 h-6 rounded-full bg-sky-600/20 text-sky-400 text-xs flex items-center justify-center font-bold">
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#22B9FF]/15 text-[#22B9FF] text-xs flex items-center justify-center font-bold">
                           {idx + 1}
                         </span>
 
@@ -993,7 +994,7 @@ ${cols}
                               handleRenameGroup(idx, editingName);
                               setEditingIdx(null);
                             }}
-                            className="flex-1 bg-gray-700 border border-sky-500/60 rounded px-2 py-0.5 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-sky-400"
+                            className="flex-1 bg-white border border-[#22B9FF]/50 rounded px-2 py-0.5 text-sm text-[#464E5F] focus:outline-none focus:ring-1 focus:ring-[#22B9FF]/40"
                           />
                         ) : (
                           <span
@@ -1001,8 +1002,8 @@ ${cols}
                               setEditingIdx(idx);
                               setEditingName(group.baseLabel);
                             }}
-                            className={`text-sm font-medium flex-1 cursor-pointer hover:text-white transition-colors group flex items-center gap-1 ${
-                              isOver ? "text-red-300" : "text-gray-200"
+                            className={`text-sm font-medium flex-1 cursor-pointer transition-colors group flex items-center gap-1 ${
+                              isOver ? "text-[#F64E60]" : "text-[#464E5F] hover:text-[#173872]"
                             }`}
                             title="Clique para editar o nome"
                           >
@@ -1014,19 +1015,18 @@ ${cols}
                         {/* Contagem de perguntas */}
                         <span className={`text-xs px-2 py-0.5 rounded-full font-mono flex-shrink-0 ${
                           isOver
-                            ? "bg-red-800/50 text-red-300"
-                            : "bg-gray-700 text-gray-400"
+                            ? "bg-[#F64E60]/10 text-[#F64E60]"
+                            : "bg-[#e8e8e8] text-[#80808F]"
                         }`}>
                           {qCount} {qCount === 1 ? "pergunta" : "perguntas"}
                         </span>
 
                         {/* Botões de ação */}
                         <div className="flex gap-1 flex-shrink-0 items-center">
-                          {/* Mover */}
                           <button
                             onClick={() => handleMoveUp(idx)}
                             disabled={idx === 0}
-                            className="p-1 rounded bg-gray-700/50 hover:bg-gray-600/50 disabled:opacity-25 disabled:cursor-not-allowed text-gray-400 transition-colors"
+                            className="p-1 rounded bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] disabled:opacity-25 disabled:cursor-not-allowed text-[#80808F] transition-colors"
                             title="Mover para cima"
                           >
                             <ChevronUp className="w-3 h-3" />
@@ -1034,17 +1034,16 @@ ${cols}
                           <button
                             onClick={() => handleMoveDown(idx)}
                             disabled={idx === workingGroups.length - 1}
-                            className="p-1 rounded bg-gray-700/50 hover:bg-gray-600/50 disabled:opacity-25 disabled:cursor-not-allowed text-gray-400 transition-colors"
+                            className="p-1 rounded bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] disabled:opacity-25 disabled:cursor-not-allowed text-[#80808F] transition-colors"
                             title="Mover para baixo"
                           >
                             <ChevronDown className="w-3 h-3" />
                           </button>
 
-                          {/* Dividir / Unir */}
                           {qCount >= 2 && (
                             <button
                               onClick={() => handleSplit(idx)}
-                              className="px-2 py-1 rounded bg-amber-800/30 hover:bg-amber-700/40 text-amber-300 text-xs transition-colors"
+                              className="px-2 py-1 rounded bg-[#FFB822]/10 hover:bg-[#FFB822]/20 text-[#FFB822] text-xs transition-colors"
                               title="Dividir ao meio"
                             >
                               ÷ Dividir
@@ -1053,20 +1052,19 @@ ${cols}
                           {idx < workingGroups.length - 1 && (
                             <button
                               onClick={() => handleJoin(idx)}
-                              className="px-2 py-1 rounded bg-sky-800/30 hover:bg-sky-700/40 text-sky-300 text-xs transition-colors"
+                              className="px-2 py-1 rounded bg-[#22B9FF]/10 hover:bg-[#22B9FF]/20 text-[#22B9FF] text-xs transition-colors"
                               title="Unir com a próxima seção"
                             >
                               + Unir
                             </button>
                           )}
 
-                          {/* Copiar */}
                           <button
                             onClick={() => {
                               navigator.clipboard.writeText(label);
                               showToast("Copiado!", "success");
                             }}
-                            className="p-1.5 rounded bg-gray-700/50 hover:bg-gray-600/50 text-gray-400 transition-colors"
+                            className="p-1.5 rounded bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] text-[#80808F] transition-colors"
                             title="Copiar nome"
                           >
                             <Copy className="w-3 h-3" />
@@ -1077,10 +1075,10 @@ ${cols}
                   })}
                 </div>
               ) : (
-                <div className="flex flex-col items-center justify-center gap-3 py-12 text-gray-500">
+                <div className="flex flex-col items-center justify-center gap-3 py-12 text-[#80808F]">
                   <Tag className="w-8 h-8 opacity-40" />
                   <p className="text-sm">Nenhuma seção detectada no texto corrigido.</p>
-                  <p className="text-xs text-gray-600 text-center max-w-xs">
+                  <p className="text-xs text-[#80808F]/70 text-center max-w-xs">
                     As seções são detectadas automaticamente quando o texto contém títulos numerados em maiúsculas, como &quot;1 NOME DA SEÇÃO&quot;.
                   </p>
                 </div>
@@ -1088,30 +1086,32 @@ ${cols}
 
               {/* Formato DB */}
               {workingGroups.length > 0 && (
-                <div className="space-y-3 pt-3 border-t border-gray-700/50">
+                <div className="space-y-3 pt-3 border-t border-[#e8e8e8]">
                   <div className="flex items-center justify-between gap-3">
-                    <h4 className="text-sm font-medium text-sky-400">Formato DB (checklist_status)</h4>
+                    <h4 className="text-sm font-semibold text-[#22B9FF]">
+                      Formato DB (checklist_status)
+                    </h4>
                     <div className="flex items-center gap-2">
-                      <label className="text-xs text-gray-400">ID do checklist:</label>
+                      <label className="text-xs text-[#80808F]">ID do checklist:</label>
                       <input
                         type="text"
                         value={checklistId}
                         onChange={(e) => setChecklistId(e.target.value)}
-                        className="w-20 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-sky-500/50"
+                        className="w-20 bg-white border border-[#d0d0d0] rounded-lg px-2 py-1 text-sm text-center text-[#464E5F] focus:outline-none focus:ring-2 focus:ring-[#22B9FF]/40 transition-colors"
                       />
                       <button
                         onClick={() => {
                           navigator.clipboard.writeText(buildStatusRows(workingGroups));
                           showToast("Formato DB copiado!", "success");
                         }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-800/40 hover:bg-sky-700/50 text-sky-300 text-sm transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#22B9FF]/10 hover:bg-[#22B9FF]/20 text-[#22B9FF] text-sm transition-colors"
                       >
                         <Copy className="w-3.5 h-3.5" />
                         Copiar
                       </button>
                     </div>
                   </div>
-                  <pre className="bg-gray-900 border border-gray-700 rounded-lg p-3 text-xs text-gray-300 overflow-x-auto whitespace-pre">
+                  <pre className="bg-[#F9F9F9] border border-[#e0e0e0] rounded-lg p-3 text-xs text-[#464E5F] overflow-x-auto whitespace-pre">
                     {buildStatusRows(workingGroups)}
                   </pre>
                 </div>
@@ -1134,11 +1134,10 @@ function DiffView({
   const oldWords = original.split(/(\s+)/);
   const newWords = corrected.split(/(\s+)/);
 
-  // Simple LCS-based diff
   const maxLen = Math.max(oldWords.length, newWords.length);
   if (maxLen > 5000) {
     return (
-      <div className="p-4 bg-gray-800 rounded-lg text-sm text-gray-400">
+      <div className="p-4 bg-[#F9F9F9] border border-[#e0e0e0] rounded-lg text-sm text-[#80808F]">
         Texto muito longo para comparação visual.
       </div>
     );
@@ -1180,27 +1179,27 @@ function DiffView({
   }
 
   return (
-    <div className="p-4 bg-gray-800 rounded-lg text-sm font-mono whitespace-pre-wrap max-h-80 overflow-auto">
+    <div className="p-4 bg-[#F9F9F9] border border-[#e0e0e0] rounded-lg text-sm font-mono whitespace-pre-wrap max-h-80 overflow-auto">
       {ops.map((op, idx) => (
         <span
           key={idx}
           className={
             op.type === "added"
-              ? "bg-green-800/50 text-green-300"
+              ? "bg-[#0BB783]/20 text-[#0BB783]"
               : op.type === "removed"
-              ? "bg-red-800/50 text-red-300 line-through"
-              : ""
+              ? "bg-[#F64E60]/20 text-[#F64E60] line-through"
+              : "text-[#464E5F]"
           }
         >
           {op.value}
         </span>
       ))}
-      <div className="mt-3 pt-3 border-t border-gray-700 flex gap-4 text-xs text-gray-500">
+      <div className="mt-3 pt-3 border-t border-[#e8e8e8] flex gap-4 text-xs text-[#80808F]">
         <span className="flex items-center gap-1">
-          <span className="w-3 h-3 bg-green-800/50 rounded" /> Adicionado
+          <span className="w-3 h-3 bg-[#0BB783]/20 rounded" /> Adicionado
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-3 h-3 bg-red-800/50 rounded" /> Removido
+          <span className="w-3 h-3 bg-[#F64E60]/20 rounded" /> Removido
         </span>
       </div>
     </div>

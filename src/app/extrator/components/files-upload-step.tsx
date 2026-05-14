@@ -89,8 +89,8 @@ export function FilesUploadStep({
     <div className="space-y-8">
       {/* PDF */}
       <div className="space-y-3">
-        <h3 className="text-sm font-medium text-gray-300 flex items-center gap-2">
-          <FileText className="w-4 h-4 text-red-400" />
+        <h3 className="text-sm font-medium text-[#464E5F] flex items-center gap-2">
+          <FileText className="w-4 h-4 text-[#ED3237]" />
           Arquivo PDF
         </h3>
 
@@ -103,17 +103,21 @@ export function FilesUploadStep({
             hint="Aceita .pdf (máx. 50MB)"
           />
         ) : (
-          <div className="flex items-center gap-3 p-4 bg-gray-800 rounded-xl border border-gray-700">
-            <div className="p-2 bg-red-500/10 rounded-lg">
-              <FileText className="w-5 h-5 text-red-400" />
+          <div className="flex items-center gap-3 p-4 bg-[#F9F9F9] rounded-xl border border-[#e8e8e8]">
+            <div className="p-2 bg-[#ED3237]/10 rounded-lg">
+              <FileText className="w-5 h-5 text-[#ED3237]" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="truncate font-medium text-sm">{pdfFile.name}</p>
-              <p className="text-xs text-gray-400">{formatFileSize(pdfFile.size)}</p>
+              <p className="truncate font-medium text-sm text-[#464E5F]">
+                {pdfFile.name}
+              </p>
+              <p className="text-xs text-[#80808F]">
+                {formatFileSize(pdfFile.size)}
+              </p>
             </div>
             <button
               onClick={() => onPdfChange(null)}
-              className="p-1.5 hover:bg-gray-700 rounded-lg transition-colors text-gray-400 hover:text-gray-200"
+              className="p-1.5 hover:bg-[#e8e8e8] rounded-lg transition-colors text-[#80808F] hover:text-[#464E5F]"
             >
               <X className="w-4 h-4" />
             </button>
@@ -122,15 +126,15 @@ export function FilesUploadStep({
       </div>
 
       {/* Divider */}
-      <div className="border-t border-gray-800" />
+      <div className="border-t border-[#e8e8e8]" />
 
       {/* Images */}
       <div className="space-y-3">
-        <h3 className="text-sm font-medium text-gray-300 flex items-center gap-2">
-          <Images className="w-4 h-4 text-violet-400" />
+        <h3 className="text-sm font-medium text-[#464E5F] flex items-center gap-2">
+          <Images className="w-4 h-4 text-[#173872]" />
           Imagens de Referência
           {images.length > 0 && (
-            <span className="text-xs text-gray-500">({images.length})</span>
+            <span className="text-xs text-[#80808F]">({images.length})</span>
           )}
         </h3>
 
@@ -148,16 +152,16 @@ export function FilesUploadStep({
             {images.map((img, idx) => (
               <div
                 key={img.id}
-                className="relative group bg-gray-800 rounded-lg overflow-hidden border border-gray-700"
+                className="relative group bg-white rounded-lg overflow-hidden border border-[#e8e8e8]"
               >
-                <div className="absolute top-1 left-1 bg-violet-600 text-white text-xs px-1.5 py-0.5 rounded font-medium z-10">
+                <div className="absolute top-1 left-1 bg-[#173872] text-white text-xs px-1.5 py-0.5 rounded font-medium z-10">
                   {idx + 1}
                 </div>
                 <button
                   onClick={() => removeImage(img.id)}
-                  className="absolute top-1 right-1 p-1 bg-red-600 hover:bg-red-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                  className="absolute top-1 right-1 p-1 bg-[#F64E60] hover:bg-[#ED3237] rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
                 >
-                  <X className="w-3 h-3" />
+                  <X className="w-3 h-3 text-white" />
                 </button>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
@@ -166,8 +170,10 @@ export function FilesUploadStep({
                   className="w-full h-32 object-cover"
                 />
                 <div className="p-2">
-                  <p className="text-xs text-gray-400 truncate">{img.name}</p>
-                  <p className="text-xs text-gray-500">{formatFileSize(img.size)}</p>
+                  <p className="text-xs text-[#80808F] truncate">{img.name}</p>
+                  <p className="text-xs text-[#80808F]/70">
+                    {formatFileSize(img.size)}
+                  </p>
                 </div>
               </div>
             ))}
