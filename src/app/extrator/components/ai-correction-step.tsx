@@ -89,7 +89,7 @@ export function AiCorrectionStep({
     const res = await fetch("/api/extract-pdf", {
       method: "POST",
       body: formData,
-    });
+    }); 
 
     const data = await res.json();
     if (!data.success) {
