@@ -65,6 +65,7 @@ export function AiCorrectionStep({
   const [isGeneratingFields, setIsGeneratingFields] = useState(false);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editingName, setEditingName] = useState("");
+  const [showSql, setShowSql] = useState(false);
 
   const isProcessing = processingStep !== null || isGeneratingFields;
 
@@ -402,33 +403,114 @@ ${cols}
 
   function buildStatusRows(groups: WorkingGroup[]): string {
     const q = (val: string) => `"${val}"`;
-    const row = (vals: string[]) => vals.map(q).join(" ");
+    const row = (vals: string[]) => vals.map(q).join("\t");
     const id = checklistId.trim() || "217";
 
-    const dataRow = (etapa: number, name: string, isFirst: boolean, isLast: boolean) =>
-      row([
-        id, String(etapa), "[NULL]", name,
+    const dados = row([
+      id, "0", "[NULL]", "Dados do Veiculo e Cliente",
+      "warning", "sempagina.php", "sempagina.php", "sempagina.php",
+      "1", "Salvar e Continuar", "insert", "[NULL]",
+      "0", "0", "1", "", "0", "0", "0", "0;1", "Checklist", "", "0", "0",
+    ]);
+
+    const sectionRows = groups.map((g, i) => {
+      const etapa = i + 1;
+      const isLast = i === groups.length - 1;
+      const http = etapa === 1 ? "post" : "put";
+      const btn = isLast ? "Salvar e Finalizar" : "Salvar e Continuar";
+      const fin2 = isLast ? "[NULL]" : "0";
+      return row([
+        id, String(etapa), "[NULL]", getDisplayLabel(groups, g),
         "warning", "sempagina.php", "sempagina.php", "sempagina.php",
-        "1",
-        isLast ? "Salvar e Finalizar" : "Salvar e Continuar",
-        isFirst ? "insert" : "update",
-        isFirst ? "post" : "put",
-        isLast ? "1" : "0",
-        isLast ? "1" : "0",
-        "1", "", "0", "0", "0", "0;1", "Checklist", "", "0",
+        "1", btn, "update", http,
+        "0", fin2, "1", "", "0", "0", "0", "0;1", "Checklist", "", "0", "0",
       ]);
+    });
 
-    const endRow = (etapa: number) =>
-      row([id, String(etapa), "[NULL]", "Finalizado", "end", "", "", "", "0", "", "", "", "0", "0", "1", "", "0", "0", "0", "0;1;2", "Checklist", "", "0"]);
+    const next = groups.length + 1;
 
-    const lines: string[] = [
-      dataRow(0, "Dados do Veiculo e Cliente", true, false),
-      ...groups.map((g, i) =>
-        dataRow(i + 1, getDisplayLabel(groups, g), false, i === groups.length - 1)
-      ),
-      endRow(groups.length + 1),
-    ];
-    return lines.join("\n");
+    const assinaturaConsultor = row([
+      id, String(next), "[NULL]", "Assinatura Consultor",
+      "warning", "sempagina.php", "sempagina.php", "sempagina.php",
+      "1", "Salvar e Finalizar", "update", "put",
+      "0", "[NULL]", "1", "", "0", "0", "0", "0;1", "Checklist", "", "0", "0",
+    ]);
+
+    const assinaturaCliente = row([
+      id, String(next + 1), "[NULL]", "Assinatura Cliente",
+      "warning", "sempagina.php", "sempagina.php", "sempagina.php",
+      "1", "Salvar e Finalizar", "update", "put",
+      "1", "1", "1", "", "0", "0", "0", "0;1", "Checklist", "", "0", "0",
+    ]);
+
+    const finalizado = row([
+      id, String(next + 2), "[NULL]", "Finalizado",
+      "end", "", "", "", "0", "", "", "",
+      "0", "0", "1", "", "0", "0", "0", "0;1;2", "Checklist", "", "0", "0",
+    ]);
+
+    return [dados, ...sectionRows, assinaturaConsultor, assinaturaCliente, finalizado].join("\n");
+  }
+
+  function buildSqlInserts(groups: WorkingGroup[]): string {
+    const id = parseInt(checklistId.trim() || "217");
+    const esc = (s: string) => s.replace(/'/g, "''");
+
+    const colsBase = "checklist,status,setor,setorCor,link,linksalvar,linkproximo,nivel,botao,acao";
+    const colsTail = "perguntaAplicavel,oficinaDigital,inicioMecanico,inicioOutros,acesso,tituloPagina,informacaoAdicional,todasAssinaturas,validaFormularios";
+
+    const valBase = (etapa: number, name: string, btn: string, acao: string) =>
+      `${id},${etapa},'${esc(name)}','warning','sempagina.php','sempagina.php','sempagina.php','1','${btn}','${acao}'`;
+
+    const lines: string[] = [];
+
+    // Dados do Veiculo e Cliente — sem acaoApi
+    lines.push(
+      `INSERT INTO checklist_status (${colsBase},exibePdf,enviaEmail,header,${colsTail})\n` +
+      `  VALUES (${valBase(0, "Dados do Veiculo e Cliente", "Salvar e Continuar", "insert")},0,0,1,'',0,0,0,'0;1','Checklist','',0,0);`
+    );
+
+    // Section rows
+    groups.forEach((g, i) => {
+      const etapa = i + 1;
+      const isLast = i === groups.length - 1;
+      const http = etapa === 1 ? "post" : "put";
+      const btn = isLast ? "Salvar e Finalizar" : "Salvar e Continuar";
+      const name = getDisplayLabel(groups, g);
+      if (!isLast) {
+        lines.push(
+          `INSERT INTO checklist_status (${colsBase},acaoApi,exibePdf,enviaEmail,header,${colsTail})\n` +
+          `  VALUES (${valBase(etapa, name, btn, "update")},'${http}',0,0,1,'',0,0,0,'0;1','Checklist','',0,0);`
+        );
+      } else {
+        lines.push(
+          `INSERT INTO checklist_status (${colsBase},acaoApi,exibePdf,header,${colsTail})\n` +
+          `  VALUES (${valBase(etapa, name, btn, "update")},'${http}',0,1,'',0,0,0,'0;1','Checklist','',0,0);`
+        );
+      }
+    });
+
+    const next = groups.length + 1;
+
+    // Assinatura Consultor — sem enviaEmail
+    lines.push(
+      `INSERT INTO checklist_status (${colsBase},acaoApi,exibePdf,header,${colsTail})\n` +
+      `  VALUES (${valBase(next, "Assinatura Consultor", "Salvar e Finalizar", "update")},'put',0,1,'',0,0,0,'0;1','Checklist','',0,0);`
+    );
+
+    // Assinatura Cliente — exibePdf=1, enviaEmail=1
+    lines.push(
+      `INSERT INTO checklist_status (${colsBase},acaoApi,exibePdf,enviaEmail,header,${colsTail})\n` +
+      `  VALUES (${valBase(next + 1, "Assinatura Cliente", "Salvar e Finalizar", "update")},'put',1,1,1,'',0,0,0,'0;1','Checklist','',0,0);`
+    );
+
+    // Finalizado
+    lines.push(
+      `INSERT INTO checklist_status (${colsBase},acaoApi,exibePdf,enviaEmail,header,${colsTail})\n` +
+      `  VALUES (${id},${next + 2},'Finalizado','end','','','','0','','','',0,0,1,'',0,0,0,'0;1;2','Checklist','',0,0);`
+    );
+
+    return lines.join("\n\n");
   }
 
   const geminiModels = AI_MODELS.filter((m) => m.provider === "gemini");
@@ -1084,37 +1166,71 @@ ${cols}
                 </div>
               )}
 
-              {/* Formato DB */}
+              {/* Formato DB + SQL */}
               {workingGroups.length > 0 && (
-                <div className="space-y-3 pt-3 border-t border-[#e8e8e8]">
-                  <div className="flex items-center justify-between gap-3">
-                    <h4 className="text-sm font-semibold text-[#22B9FF]">
-                      Formato DB (checklist_status)
-                    </h4>
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs text-[#80808F]">ID do checklist:</label>
-                      <input
-                        type="text"
-                        value={checklistId}
-                        onChange={(e) => setChecklistId(e.target.value)}
-                        className="w-20 bg-white border border-[#d0d0d0] rounded-lg px-2 py-1 text-sm text-center text-[#464E5F] focus:outline-none focus:ring-2 focus:ring-[#22B9FF]/40 transition-colors"
-                      />
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(buildStatusRows(workingGroups));
-                          showToast("Formato DB copiado!", "success");
-                        }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#22B9FF]/10 hover:bg-[#22B9FF]/20 text-[#22B9FF] text-sm transition-colors"
-                      >
-                        <Copy className="w-3.5 h-3.5" />
-                        Copiar
-                      </button>
+                <>
+                  {/* Formato DB */}
+                  <div className="space-y-3 pt-3 border-t border-[#e8e8e8]">
+                    <div className="flex items-center justify-between gap-3">
+                      <h4 className="text-sm font-semibold text-[#22B9FF]">
+                        Formato DB (checklist_status)
+                      </h4>
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs text-[#80808F]">ID do checklist:</label>
+                        <input
+                          type="text"
+                          value={checklistId}
+                          onChange={(e) => setChecklistId(e.target.value)}
+                          className="w-20 bg-white border border-[#d0d0d0] rounded-lg px-2 py-1 text-sm text-center text-[#464E5F] focus:outline-none focus:ring-2 focus:ring-[#22B9FF]/40 transition-colors"
+                        />
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(buildStatusRows(workingGroups));
+                            showToast("Formato DB copiado!", "success");
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#22B9FF]/10 hover:bg-[#22B9FF]/20 text-[#22B9FF] text-sm transition-colors"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                          Copiar
+                        </button>
+                      </div>
                     </div>
+                    <pre className="bg-[#F9F9F9] border border-[#e0e0e0] rounded-lg p-3 text-xs text-[#464E5F] overflow-x-auto whitespace-pre">
+                      {buildStatusRows(workingGroups)}
+                    </pre>
                   </div>
-                  <pre className="bg-[#F9F9F9] border border-[#e0e0e0] rounded-lg p-3 text-xs text-[#464E5F] overflow-x-auto whitespace-pre">
-                    {buildStatusRows(workingGroups)}
-                  </pre>
-                </div>
+
+                  {/* SQL INSERTs */}
+                  <div className="pt-3 border-t border-[#e8e8e8]">
+                    <button
+                      onClick={() => setShowSql((v) => !v)}
+                      className="flex items-center gap-2 text-sm font-semibold text-[#173872] hover:text-[#143266] transition-colors"
+                    >
+                      <ChevronDown className={`w-4 h-4 transition-transform ${showSql ? "rotate-180" : ""}`} />
+                      SQL INSERT (checklist_status)
+                    </button>
+
+                    {showSql && (
+                      <div className="mt-3 space-y-2">
+                        <div className="flex justify-end">
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(buildSqlInserts(workingGroups));
+                              showToast("SQL copiado!", "success");
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#173872]/10 hover:bg-[#173872]/20 text-[#173872] text-sm transition-colors"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                            Copiar SQL
+                          </button>
+                        </div>
+                        <pre className="bg-[#F9F9F9] border border-[#e0e0e0] rounded-lg p-3 text-xs text-[#464E5F] overflow-x-auto whitespace-pre">
+                          {buildSqlInserts(workingGroups)}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           )}
