@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import {
   FileText,
   Sparkles,
@@ -10,15 +10,56 @@ import {
   ShoppingBag,
   Construction,
   FolderOpen,
+  ClipboardList,
+  Package,
+  Search,
+  ClipboardCheck,
 } from "lucide-react";
 import Link from "next/link";
 import { FilesUploadStep } from "./components/files-upload-step";
 import { AiCorrectionStep } from "./components/ai-correction-step";
 import { ApiKeyModal } from "./components/api-key-modal";
 import { ToastContainer } from "@/components/ui/toast";
-import type { UploadedImage } from "@/lib/types";
+import type { UploadedImage, ChecklistType } from "@/lib/types";
 
 type Project = "entrega-impecavel" | "pos-venda";
+
+const CHECKLIST_TYPES: {
+  id: ChecklistType | string;
+  name: string;
+  description: string;
+  icon: React.ElementType;
+  available: boolean;
+}[] = [
+  {
+    id: "pos-recebimento",
+    name: "Pós Recebimento",
+    description: "Checklist de verificação após recebimento do veículo",
+    icon: Package,
+    available: false,
+  },
+  {
+    id: "revisao-entrega",
+    name: "Revisão de Entrega",
+    description: "Revisão dos itens antes da entrega ao cliente",
+    icon: ClipboardCheck,
+    available: false,
+  },
+  {
+    id: "inspecao-pre-entrega",
+    name: "Inspeção Pré-Entrega",
+    description: "Inspeção técnica completa antes da entrega",
+    icon: Search,
+    available: false,
+  },
+  {
+    id: "roteiro-entrega-tecnica" as ChecklistType,
+    name: "Roteiro para Entrega Técnica",
+    description: "Fluxo completo de entrega técnica ao cliente",
+    icon: ClipboardList,
+    available: true,
+  },
+];
 
 const PROJECTS = [
   {
@@ -39,12 +80,14 @@ const PROJECTS = [
 
 export default function ExtratorPage() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [checklistType, setChecklistType] = useState<ChecklistType | null>(null);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [images, setImages] = useState<UploadedImage[]>([]);
   const [showApiModal, setShowApiModal] = useState(false);
 
   const handleSelectProject = useCallback((project: Project) => {
     setSelectedProject(project);
+    setChecklistType(null);
     setPdfFile(null);
     setImages([]);
   }, []);
@@ -161,7 +204,77 @@ export default function ExtratorPage() {
 
         {selectedProject === "entrega-impecavel" && (
           <>
-            {/* Step 2 — PDF + Imagens */}
+            {/* Step 2 — Tipo de Checklist */}
+            <section
+              className="bg-white rounded-xl border border-[#e8e8e8] overflow-hidden"
+              style={{ boxShadow: "0px 0px 20px 0px rgba(76,87,125,0.04)" }}
+            >
+              <div className="flex items-center gap-3 px-6 py-4 border-b border-[#e8e8e8]">
+                <span
+                  className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white ${
+                    checklistType ? "bg-[#0BB783]" : "bg-[#ED3237]"
+                  }`}
+                >
+                  {checklistType ? "✓" : "2"}
+                </span>
+                <h2 className="text-base font-semibold text-[#464E5F]">
+                  Selecionar Tipo de Checklist
+                </h2>
+              </div>
+              <div className="p-6">
+                <div className="grid sm:grid-cols-2 gap-4">
+                  {CHECKLIST_TYPES.map((ct) => {
+                    const Icon = ct.icon;
+                    const isSelected = checklistType === ct.id;
+                    return (
+                      <button
+                        key={ct.id}
+                        onClick={() =>
+                          ct.available &&
+                          setChecklistType(ct.id as ChecklistType)
+                        }
+                        disabled={!ct.available}
+                        className={`relative text-left p-5 rounded-xl border-2 transition-all ${
+                          !ct.available
+                            ? "border-[#e8e8e8] bg-[#F9F9F9] opacity-50 cursor-not-allowed"
+                            : isSelected
+                            ? "border-[#ED3237] bg-[#ED3237]/5"
+                            : "border-[#e8e8e8] hover:border-[#ED3237]/40 hover:bg-[#F9F9F9] cursor-pointer"
+                        }`}
+                      >
+                        {!ct.available && (
+                          <span className="absolute top-3 right-3 flex items-center gap-1 text-xs text-[#FFB822] bg-[#FFB822]/10 px-2 py-0.5 rounded-full border border-[#FFB822]/30">
+                            <Construction className="w-3 h-3" />
+                            Em breve
+                          </span>
+                        )}
+                        <div className="flex items-center gap-3 mb-2">
+                          <div
+                            className={`p-2 rounded-lg ${
+                              isSelected
+                                ? "bg-[#ED3237] text-white"
+                                : "bg-[#F9F9F9] text-[#80808F]"
+                            }`}
+                          >
+                            <Icon className="w-5 h-5" />
+                          </div>
+                          <span className="font-semibold text-sm text-[#464E5F]">
+                            {ct.name}
+                          </span>
+                        </div>
+                        <p className="text-sm text-[#80808F]">{ct.description}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+          </>
+        )}
+
+        {selectedProject === "entrega-impecavel" && checklistType && (
+          <>
+            {/* Step 3 — PDF + Imagens */}
             <section
               className="bg-white rounded-xl border border-[#e8e8e8] overflow-hidden"
               style={{ boxShadow: "0px 0px 20px 0px rgba(76,87,125,0.04)" }}
@@ -174,7 +287,7 @@ export default function ExtratorPage() {
                       : "bg-[#ED3237]"
                   }`}
                 >
-                  {pdfFile && images.length > 0 ? "✓" : "2"}
+                  {pdfFile && images.length > 0 ? "✓" : "3"}
                 </span>
                 <h2 className="text-base font-semibold text-[#464E5F] flex items-center gap-2">
                   <FolderOpen className="w-5 h-5 text-[#173872]" />
@@ -191,14 +304,14 @@ export default function ExtratorPage() {
               </div>
             </section>
 
-            {/* Step 3 — IA */}
+            {/* Step 4 — IA */}
             <section
               className="bg-white rounded-xl border border-[#e8e8e8] overflow-hidden"
               style={{ boxShadow: "0px 0px 20px 0px rgba(76,87,125,0.04)" }}
             >
               <div className="flex items-center gap-3 px-6 py-4 border-b border-[#e8e8e8]">
                 <span className="w-8 h-8 rounded-full bg-[#ED3237] flex items-center justify-center text-sm font-bold text-white">
-                  3
+                  4
                 </span>
                 <h2 className="text-base font-semibold text-[#464E5F] flex items-center gap-2">
                   <Sparkles className="w-5 h-5 text-[#173872]" />

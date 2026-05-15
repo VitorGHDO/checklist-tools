@@ -17,10 +17,12 @@ import {
   ChevronDown,
   Plus,
   Pencil,
+  Database,
 } from "lucide-react";
 import { showToast } from "@/components/ui/toast";
 import { AI_MODELS, type UploadedImage } from "@/lib/types";
 import type { MigrationField } from "@/app/api/generate-fields/route";
+import { PerguntasStatusTab } from "./perguntas-status-tab";
 
 interface WorkingGroup {
   id: string;
@@ -38,7 +40,7 @@ interface Props {
 }
 
 type ProcessingStep = "extracting" | "correcting" | null;
-type ResultTab = "corrected" | "fields" | "sections";
+type ResultTab = "corrected" | "fields" | "sections" | "perguntas";
 
 export function AiCorrectionStep({
   pdfFile,
@@ -65,7 +67,10 @@ export function AiCorrectionStep({
   const [isGeneratingFields, setIsGeneratingFields] = useState(false);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editingName, setEditingName] = useState("");
-  const [showSql, setShowSql] = useState(false);
+  const [showStatusDb, setShowStatusDb] = useState(false);
+  const [statusDbOutput, setStatusDbOutput] = useState("");
+  const [showStatusSql, setShowStatusSql] = useState(false);
+  const [statusSqlOutput, setStatusSqlOutput] = useState("");
 
   const isProcessing = processingStep !== null || isGeneratingFields;
 
@@ -727,6 +732,20 @@ ${cols}
                 )}
               </button>
             )}
+            {migrationFields.length > 0 && workingGroups.length > 0 && (
+              <button
+                onClick={() => setActiveTab("perguntas")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  activeTab === "perguntas"
+                    ? "bg-[#8950FC] text-white shadow-sm"
+                    : "text-[#80808F] hover:text-[#464E5F]"
+                }`}
+              >
+                <Database className="w-4 h-4" />
+                Perguntas por Status
+                <span className="ml-1 text-xs opacity-70">({migrationFields.length})</span>
+              </button>
+            )}
           </div>
 
           {/* Tab: Perguntas Completas */}
@@ -1166,73 +1185,117 @@ ${cols}
                 </div>
               )}
 
-              {/* Formato DB + SQL */}
+              {/* Formato DB + SQL toolbar */}
               {workingGroups.length > 0 && (
-                <>
-                  {/* Formato DB */}
-                  <div className="space-y-3 pt-3 border-t border-[#e8e8e8]">
-                    <div className="flex items-center justify-between gap-3">
-                      <h4 className="text-sm font-semibold text-[#22B9FF]">
-                        Formato DB (checklist_status)
-                      </h4>
-                      <div className="flex items-center gap-2">
-                        <label className="text-xs text-[#80808F]">ID do checklist:</label>
-                        <input
-                          type="text"
-                          value={checklistId}
-                          onChange={(e) => setChecklistId(e.target.value)}
-                          className="w-20 bg-white border border-[#d0d0d0] rounded-lg px-2 py-1 text-sm text-center text-[#464E5F] focus:outline-none focus:ring-2 focus:ring-[#22B9FF]/40 transition-colors"
-                        />
-                        <button
-                          onClick={() => {
-                            navigator.clipboard.writeText(buildStatusRows(workingGroups));
-                            showToast("Formato DB copiado!", "success");
-                          }}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#22B9FF]/10 hover:bg-[#22B9FF]/20 text-[#22B9FF] text-sm transition-colors"
-                        >
-                          <Copy className="w-3.5 h-3.5" />
-                          Copiar
-                        </button>
-                      </div>
-                    </div>
-                    <pre className="bg-[#F9F9F9] border border-[#e0e0e0] rounded-lg p-3 text-xs text-[#464E5F] overflow-x-auto whitespace-pre">
-                      {buildStatusRows(workingGroups)}
-                    </pre>
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-[#e8e8e8]">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-[#80808F]">ID do checklist:</label>
+                    <input
+                      type="text"
+                      value={checklistId}
+                      onChange={(e) => setChecklistId(e.target.value)}
+                      className="w-20 bg-white border border-[#d0d0d0] rounded-lg px-2 py-1 text-sm text-center text-[#464E5F] focus:outline-none focus:ring-2 focus:ring-[#22B9FF]/40 transition-colors"
+                    />
                   </div>
-
-                  {/* SQL INSERTs */}
-                  <div className="pt-3 border-t border-[#e8e8e8]">
+                  <div className="flex gap-2">
                     <button
-                      onClick={() => setShowSql((v) => !v)}
-                      className="flex items-center gap-2 text-sm font-semibold text-[#173872] hover:text-[#143266] transition-colors"
+                      onClick={() => {
+                        setStatusDbOutput(buildStatusRows(workingGroups));
+                        setShowStatusDb(true);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#22B9FF]/10 hover:bg-[#22B9FF]/20 text-[#22B9FF] text-sm font-medium transition-colors border border-[#22B9FF]/30"
                     >
-                      <ChevronDown className={`w-4 h-4 transition-transform ${showSql ? "rotate-180" : ""}`} />
-                      SQL INSERT (checklist_status)
+                      <Copy className="w-3.5 h-3.5" />
+                      Formato DB
                     </button>
-
-                    {showSql && (
-                      <div className="mt-3 space-y-2">
-                        <div className="flex justify-end">
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(buildSqlInserts(workingGroups));
-                              showToast("SQL copiado!", "success");
-                            }}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#173872]/10 hover:bg-[#173872]/20 text-[#173872] text-sm transition-colors"
-                          >
-                            <Copy className="w-3.5 h-3.5" />
-                            Copiar SQL
-                          </button>
-                        </div>
-                        <pre className="bg-[#F9F9F9] border border-[#e0e0e0] rounded-lg p-3 text-xs text-[#464E5F] overflow-x-auto whitespace-pre">
-                          {buildSqlInserts(workingGroups)}
-                        </pre>
-                      </div>
-                    )}
+                    <button
+                      onClick={() => {
+                        setStatusSqlOutput(buildSqlInserts(workingGroups));
+                        setShowStatusSql(true);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#8950FC]/10 hover:bg-[#8950FC]/20 text-[#8950FC] text-sm font-medium transition-colors border border-[#8950FC]/30"
+                    >
+                      <Database className="w-3.5 h-3.5" />
+                      Gerar SQL
+                    </button>
                   </div>
-                </>
+                </div>
+              )}
+
+              {/* Formato DB output */}
+              {showStatusDb && statusDbOutput && (
+                <div className="space-y-2 pt-3 border-t border-[#e8e8e8]">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-[#22B9FF]">
+                      Formato DB (checklist_status)
+                    </h4>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(statusDbOutput);
+                          showToast("Formato DB copiado!", "success");
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#22B9FF]/10 hover:bg-[#22B9FF]/20 text-[#22B9FF] text-sm transition-colors"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        Copiar
+                      </button>
+                      <button
+                        onClick={() => setShowStatusDb(false)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] text-[#80808F] text-sm transition-colors"
+                      >
+                        Fechar
+                      </button>
+                    </div>
+                  </div>
+                  <pre className="bg-[#F9F9F9] border border-[#e0e0e0] rounded-lg p-3 text-xs text-[#464E5F] overflow-x-auto whitespace-pre max-h-96">
+                    {statusDbOutput}
+                  </pre>
+                </div>
+              )}
+
+              {/* SQL output */}
+              {showStatusSql && statusSqlOutput && (
+                <div className="space-y-2 pt-3 border-t border-[#e8e8e8]">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-[#8950FC] flex items-center gap-2">
+                      <Database className="w-4 h-4" />
+                      SQL INSERT (checklist_status)
+                    </h4>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(statusSqlOutput);
+                          showToast("SQL copiado!", "success");
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#8950FC]/10 hover:bg-[#8950FC]/20 text-[#8950FC] text-sm transition-colors"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        Copiar
+                      </button>
+                      <button
+                        onClick={() => setShowStatusSql(false)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] text-[#80808F] text-sm transition-colors"
+                      >
+                        Fechar
+                      </button>
+                    </div>
+                  </div>
+                  <pre className="bg-[#F9F9F9] border border-[#e0e0e0] rounded-lg p-3 text-xs text-[#464E5F] overflow-x-auto whitespace-pre max-h-96">
+                    {statusSqlOutput}
+                  </pre>
+                </div>
               )}
             </div>
+          )}
+
+          {/* Tab: Perguntas por Status */}
+          {activeTab === "perguntas" && migrationFields.length > 0 && workingGroups.length > 0 && (
+            <PerguntasStatusTab
+              groups={workingGroups}
+              fields={migrationFields}
+              checklistId={checklistId}
+            />
           )}
         </div>
       )}
