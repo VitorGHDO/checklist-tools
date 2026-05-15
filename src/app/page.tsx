@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { FileText, PenTool, ArrowRight, Lock } from "lucide-react";
 
 export default function Home() {
@@ -15,9 +16,18 @@ export default function Home() {
             </div>
             <h1 className="text-lg font-bold text-[#173872]">Checklist Tools</h1>
           </div>
-          <span className="text-xs text-[#80808F] bg-[#F9F9F9] px-2.5 py-1 rounded-full border border-[#e8e8e8]">
-            Camp Tecnologia
-          </span>
+          <div className="flex items-center gap-2">
+            <Image
+              src="/airton-light-head-aurora.png"
+              alt="Airton"
+              width={28}
+              height={28}
+              className="rounded-full"
+            />
+            <span className="text-xs text-[#80808F] bg-[#F9F9F9] px-2.5 py-1 rounded-full border border-[#e8e8e8]">
+              Airton — Camp Tecnologia
+            </span>
+          </div>
         </div>
       </header>
 
@@ -28,11 +38,11 @@ export default function Home() {
             Ferramentas Internas
           </div>
           <h2 className="text-4xl sm:text-5xl font-bold tracking-tight text-[#173872]">
-            Checklist Tools
+            Suas ferramentas de checklist
           </h2>
           <p className="text-base text-[#80808F] max-w-xl mx-auto">
-            Extraia textos de PDFs, corrija com IA e monte checklists
-            profissionais — tudo em um só lugar.
+            Extração de perguntas de PDF com IA e geração de SQL para o banco —
+            tudo em um só lugar.
           </p>
         </div>
 
@@ -53,8 +63,8 @@ export default function Home() {
                   Extrator de PDF
                 </h3>
                 <p className="text-sm text-[#80808F]">
-                  Extraia texto de PDFs e corrija com IA usando imagens de
-                  referência.
+                  Jogue o PDF, o Airton corrige o texto e gera os campos prontos
+                  para o banco.
                 </p>
               </div>
             </div>
@@ -115,8 +125,17 @@ export default function Home() {
       </main>
 
       {/* Footer */}
-      <footer className="bg-[#173872] px-6 py-4 text-center text-sm text-white/60">
-        Checklist Tools &mdash; Ferramentas internas Camp Tecnologia
+      <footer className="bg-[#173872] px-6 py-4">
+        <div className="flex items-center justify-center gap-2 text-sm text-white/60">
+          <Image
+            src="/airton-light-head-aurora.png"
+            alt="Airton"
+            width={20}
+            height={20}
+            className="rounded-full opacity-70"
+          />
+          Ferramentas do Airton &mdash; Camp Tecnologia
+        </div>
       </footer>
     </div>
   );

@@ -65,14 +65,14 @@ const PROJECTS = [
   {
     id: "entrega-impecavel" as Project,
     name: "Entrega Impecável",
-    description: "Extração e correção de PDFs do projeto Entrega Impecável",
+    description: "Extração de perguntas de PDFs do projeto Entrega Impecável",
     icon: Truck,
     available: true,
   },
   {
     id: "pos-venda" as Project,
     name: "Pós Venda",
-    description: "Extração e correção de PDFs do projeto Pós Venda",
+    description: "Extração de perguntas de PDFs do projeto Pós Venda",
     icon: ShoppingBag,
     available: false,
   },
@@ -315,7 +315,7 @@ export default function ExtratorPage() {
                 </span>
                 <h2 className="text-base font-semibold text-[#464E5F] flex items-center gap-2">
                   <Sparkles className="w-5 h-5 text-[#173872]" />
-                  Corrigir com IA
+                  Extrair Perguntas com o Airton
                 </h2>
               </div>
               <div className="p-6">

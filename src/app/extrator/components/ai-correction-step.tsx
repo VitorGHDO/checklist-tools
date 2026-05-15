@@ -7,7 +7,6 @@ import {
   Copy,
   Download,
   ArrowLeftRight,
-  Loader2,
   Table2,
   RefreshCw,
   FileCode,
@@ -22,8 +21,10 @@ import {
 import { showToast } from "@/components/ui/toast";
 import { AI_MODELS, type UploadedImage } from "@/lib/types";
 import type { MigrationField } from "@/app/api/generate-fields/route";
+import Image from "next/image";
 import { PerguntasStatusTab } from "./perguntas-status-tab";
 import { ScrollButtons } from "@/components/ui/scroll-buttons";
+import { AirtonBadge } from "@/components/ui/airton-badge";
 
 interface WorkingGroup {
   id: string;
@@ -122,7 +123,7 @@ export function AiCorrectionStep({
         const data = await res.json();
         if (data.success && Array.isArray(data.fields)) {
           setMigrationFields(data.fields);
-          showToast(`${data.fields.length} campos de migration gerados!`, "success");
+          showToast(`Airton gerou ${data.fields.length} campos!`, "success");
         } else {
           console.error("[generate-fields] Erro da API:", data.error);
           showToast("Erro ao gerar campos: " + data.error, "error");
@@ -141,7 +142,7 @@ export function AiCorrectionStep({
     async (perPage: boolean) => {
       const apiKey = getApiKey();
       if (!apiKey) {
-        showToast("Configure sua API Key primeiro.", "error");
+        showToast("Configura a API Key primeiro.", "error");
         onOpenApiKeyModal();
         return;
       }
@@ -192,7 +193,7 @@ export function AiCorrectionStep({
           finalText = results.join("\n\n--- Página ---\n\n");
           setCorrectedText(finalText);
           setActiveTab("corrected");
-          showToast("Correção por página concluída!", "success");
+          showToast("Airton extraiu as perguntas!", "success");
         } else {
           const formData = buildFormData(text, apiKey);
           images.forEach((img, idx) => {
@@ -209,7 +210,7 @@ export function AiCorrectionStep({
             finalText = data.correctedText;
             setCorrectedText(finalText);
             setActiveTab("corrected");
-            showToast("Texto corrigido com sucesso!", "success");
+            showToast("Airton extraiu as perguntas!", "success");
           } else {
             showToast("Erro da IA: " + data.error, "error");
             return;
@@ -221,7 +222,7 @@ export function AiCorrectionStep({
         }
       } catch (err) {
         console.error(err);
-        showToast("Erro ao processar", "error");
+        showToast("Tive um probleminha. Tente novamente.", "error");
       } finally {
         setProcessingStep(null);
       }
@@ -574,15 +575,15 @@ ${cols}
           className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#ED3237] hover:bg-[#A5232D] disabled:bg-[#d0d0d0] disabled:text-[#80808F] text-white font-medium transition-all"
         >
           {processingStep !== null ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
+            <Image src="/loading-airton.gif" alt="" width={20} height={20} className="rounded-full" unoptimized />
           ) : (
             <Sparkles className="w-4 h-4" />
           )}
           {processingStep === "extracting"
             ? "Extraindo PDF..."
             : processingStep === "correcting"
-            ? "Corrigindo com IA..."
-            : "Corrigir com IA"}
+            ? "Airton está extraindo as perguntas..."
+            : "Extrair Perguntas com o Airton"}
         </button>
 
         {hasPages && (
@@ -592,7 +593,7 @@ ${cols}
             className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] disabled:opacity-50 text-[#464E5F] text-sm transition-colors"
           >
             <Layers className="w-4 h-4" />
-            Corrigir por Página
+            Extrair por Página
           </button>
         )}
 
@@ -601,7 +602,7 @@ ${cols}
             onClick={() => {
               const apiKey = getApiKey();
               if (!apiKey) {
-                showToast("Configure sua API Key primeiro.", "error");
+                showToast("Configura a API Key primeiro.", "error");
                 onOpenApiKeyModal();
                 return;
               }
@@ -610,41 +611,26 @@ ${cols}
             className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#0BB783]/10 hover:bg-[#0BB783]/20 text-[#0BB783] text-sm font-medium transition-colors border border-[#0BB783]/30"
           >
             {isGeneratingFields ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Image src="/loading-airton.gif" alt="" width={20} height={20} className="rounded-full" unoptimized />
             ) : (
               <Table2 className="w-4 h-4" />
             )}
-            {isGeneratingFields ? "Gerando campos..." : "Gerar Campos"}
+            {isGeneratingFields ? "Airton está gerando os campos..." : "Gerar Campos"}
           </button>
         )}
       </div>
 
       {/* Progress bar */}
-      {isProcessing && (
-        <div className="space-y-2">
-          <div className="flex justify-between text-xs text-[#80808F]">
-            {[
-              { label: "Extrair PDF", active: processingStep === "extracting" },
-              { label: "Corrigir texto", active: processingStep === "correcting" },
-              { label: "Gerar campos", active: isGeneratingFields },
-            ].map((s) => (
-              <span key={s.label} className={s.active ? "text-[#ED3237] font-medium" : ""}>
-                {s.label}
-              </span>
-            ))}
-          </div>
-          <div className="w-full bg-[#e8e8e8] rounded-full h-1.5 overflow-hidden">
-            <div
-              className="h-full bg-[#ED3237] rounded-full transition-all duration-700 ease-in-out"
-              style={{
-                width: isGeneratingFields
-                  ? "90%"
-                  : processingStep === "correcting"
-                  ? "60%"
-                  : "25%",
-              }}
-            />
-          </div>
+      {processingStep !== null && (
+        <div className="flex flex-col items-center gap-2 py-4">
+          <Image src="/loading-airton.gif" alt="Airton trabalhando..." width={64} height={64} className="rounded-full" unoptimized />
+          <span className="text-sm font-medium text-[#ED3237]">
+            {isGeneratingFields
+              ? "Airton está gerando os campos..."
+              : processingStep === "correcting"
+              ? "Airton está extraindo as perguntas..."
+              : "Extraindo PDF..."}
+          </span>
         </div>
       )}
 
@@ -724,6 +710,7 @@ ${cols}
                 <h3 className="font-semibold text-[#0BB783] flex items-center gap-2">
                   <Sparkles className="w-4 h-4" />
                   Texto Corrigido
+                  <AirtonBadge />
                 </h3>
                 <div className="flex gap-2">
                   <button
@@ -783,6 +770,7 @@ ${cols}
                 <h3 className="font-semibold text-[#0BB783] flex items-center gap-2">
                   <Table2 className="w-4 h-4" />
                   Campos de Migration
+                  <AirtonBadge />
                 </h3>
                 <div className="flex gap-2">
                   {correctedText && (
@@ -790,7 +778,7 @@ ${cols}
                       onClick={() => {
                         const apiKey = getApiKey();
                         if (!apiKey) {
-                          showToast("Configure sua API Key primeiro.", "error");
+                          showToast("Configura a API Key primeiro.", "error");
                           onOpenApiKeyModal();
                           return;
                         }
@@ -800,7 +788,7 @@ ${cols}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] disabled:opacity-50 text-[#464E5F] text-sm transition-colors"
                     >
                       {isGeneratingFields ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <Image src="/loading-airton.gif" alt="" width={16} height={16} className="rounded-full" unoptimized />
                       ) : (
                         <RefreshCw className="w-3.5 h-3.5" />
                       )}
@@ -864,9 +852,9 @@ ${cols}
               </div>
 
               {isGeneratingFields ? (
-                <div className="flex items-center justify-center gap-3 py-12 text-[#80808F]">
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  <span className="text-sm">Gerando campos com IA...</span>
+                <div className="flex flex-col items-center justify-center gap-3 py-12">
+                  <Image src="/loading-airton.gif" alt="" width={72} height={72} className="rounded-full" unoptimized />
+                  <span className="text-sm font-medium text-[#ED3237]">Airton está gerando os campos...</span>
                 </div>
               ) : migrationFields.length > 0 ? (
                 <div className="space-y-6">
