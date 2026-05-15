@@ -49,9 +49,6 @@ export function AiCorrectionStep({
   onOpenApiKeyModal,
 }: Props) {
   const [model, setModel] = useState("gemini-2.5-flash");
-  const [keepFormat, setKeepFormat] = useState(true);
-  const [fixOrtho, setFixOrtho] = useState(true);
-  const [matchImage, setMatchImage] = useState(true);
   const [instructions, setInstructions] = useState("");
   const [correctedText, setCorrectedText] = useState("");
   const [extractedText, setExtractedText] = useState("");
@@ -228,7 +225,7 @@ export function AiCorrectionStep({
         setProcessingStep(null);
       }
     },
-    [pdfFile, images, model, keepFormat, fixOrtho, matchImage, instructions, getApiKey, onOpenApiKeyModal, extractPdf, project, generateFields]
+    [pdfFile, images, model, instructions, getApiKey, onOpenApiKeyModal, extractPdf, project, generateFields]
   );
 
   function buildFormData(text: string, apiKey: string, pageNumber?: number): FormData {
@@ -236,9 +233,9 @@ export function AiCorrectionStep({
     fd.append("text", text);
     fd.append("model", model);
     fd.append("apiKey", apiKey);
-    fd.append("keepFormat", keepFormat ? "1" : "0");
-    fd.append("fixOrtho", fixOrtho ? "1" : "0");
-    fd.append("matchImage", matchImage ? "1" : "0");
+    fd.append("keepFormat", "1");
+    fd.append("fixOrtho", "1");
+    fd.append("matchImage", "1");
     fd.append("additionalInstructions", instructions);
     fd.append("project", project);
     if (pageNumber) fd.append("pageNumber", String(pageNumber));
@@ -567,35 +564,6 @@ ${cols}
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-x-6 gap-y-2">
-        <label className="flex items-center gap-2 text-sm cursor-pointer text-[#464E5F]">
-          <input
-            type="checkbox"
-            checked={keepFormat}
-            onChange={(e) => setKeepFormat(e.target.checked)}
-            className="rounded border-[#d0d0d0] text-[#ED3237] focus:ring-[#ED3237]/30"
-          />
-          Preservar formatação
-        </label>
-        <label className="flex items-center gap-2 text-sm cursor-pointer text-[#464E5F]">
-          <input
-            type="checkbox"
-            checked={fixOrtho}
-            onChange={(e) => setFixOrtho(e.target.checked)}
-            className="rounded border-[#d0d0d0] text-[#ED3237] focus:ring-[#ED3237]/30"
-          />
-          Corrigir ortografia
-        </label>
-        <label className="flex items-center gap-2 text-sm cursor-pointer text-[#464E5F]">
-          <input
-            type="checkbox"
-            checked={matchImage}
-            onChange={(e) => setMatchImage(e.target.checked)}
-            className="rounded border-[#d0d0d0] text-[#ED3237] focus:ring-[#ED3237]/30"
-          />
-          Coincidir com imagens
-        </label>
-      </div>
 
       {/* Action Buttons */}
       <div className="flex flex-wrap gap-3 items-center">
