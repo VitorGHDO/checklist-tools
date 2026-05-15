@@ -542,11 +542,41 @@ export function PerguntasStatusTab({ groups, fields, checklistId }: Props) {
   const [sqlOutput, setSqlOutput] = useState("");
 
   useEffect(() => {
-    if (!initialized && groups.length > 0 && fields.length > 0) {
+    if (groups.length === 0 || fields.length === 0) return;
+
+    if (!initialized) {
       setPerguntas(buildAssociation(groups, fields));
       setInitialized(true);
+      return;
     }
-  }, [groups, fields, initialized]);
+
+    // Sync incremental changes to migrationFields after initialization
+    setPerguntas((prev) => {
+      const fieldPerguntas = new Set(fields.map((f) => f.pergunta));
+      const existingPerguntas = new Set(prev.map((p) => p.pergunta));
+
+      // Remove entries whose pergunta text no longer exists in fields
+      let next = prev.filter((p) => fieldPerguntas.has(p.pergunta));
+
+      // Add new fields not yet present in perguntas (as unassigned)
+      fields.forEach((f, i) => {
+        if (!existingPerguntas.has(f.pergunta)) {
+          next = [
+            ...next,
+            makeDefaults(f.campo, f.pergunta, -1, next.length + 1, "", "", 0, `synced-${i}-${Date.now()}`),
+          ];
+        }
+      });
+
+      // Sync campo name edits (pergunta text is the stable key)
+      next = next.map((p) => {
+        const match = fields.find((f) => f.pergunta === p.pergunta);
+        return match && match.campo !== p.campo ? { ...p, campo: match.campo } : p;
+      });
+
+      return next;
+    });
+  }, [fields, initialized, groups]);
 
   const resetAssociation = useCallback(() => {
     setPerguntas(buildAssociation(groups, fields));

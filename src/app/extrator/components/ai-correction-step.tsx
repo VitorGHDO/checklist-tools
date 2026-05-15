@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   Sparkles,
   Layers,
@@ -23,6 +23,7 @@ import { showToast } from "@/components/ui/toast";
 import { AI_MODELS, type UploadedImage } from "@/lib/types";
 import type { MigrationField } from "@/app/api/generate-fields/route";
 import { PerguntasStatusTab } from "./perguntas-status-tab";
+import { ScrollButtons } from "@/components/ui/scroll-buttons";
 
 interface WorkingGroup {
   id: string;
@@ -69,6 +70,7 @@ export function AiCorrectionStep({
   const [showStatusSql, setShowStatusSql] = useState(false);
   const [statusSqlOutput, setStatusSqlOutput] = useState("");
 
+  const containerRef = useRef<HTMLDivElement>(null);
   const isProcessing = processingStep !== null || isGeneratingFields;
 
   const getApiKey = useCallback((): string | null => {
@@ -120,7 +122,6 @@ export function AiCorrectionStep({
         const data = await res.json();
         if (data.success && Array.isArray(data.fields)) {
           setMigrationFields(data.fields);
-          setActiveTab("fields");
           showToast(`${data.fields.length} campos de migration gerados!`, "success");
         } else {
           console.error("[generate-fields] Erro da API:", data.error);
@@ -521,7 +522,7 @@ ${cols}
   const hasPages = extractedPages.length > 1;
 
   return (
-    <div className="space-y-6">
+    <div ref={containerRef} className="space-y-6">
       {/* Options */}
       <div className="grid sm:grid-cols-2 gap-4">
         <div>
@@ -869,35 +870,69 @@ ${cols}
                 </div>
               ) : migrationFields.length > 0 ? (
                 <div className="space-y-6">
-                  {/* Tabela campo + pergunta */}
-                  <div className="overflow-auto rounded-lg border border-[#e0e0e0]">
+                  {/* Tabela campo + pergunta — editável */}
+                  <div className="rounded-lg border border-[#e0e0e0] overflow-hidden">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-[#F9F9F9] border-b border-[#e0e0e0]">
-                          <th className="text-left px-4 py-3 text-[#0BB783] font-semibold w-56">
-                            campo
-                          </th>
-                          <th className="text-left px-4 py-3 text-[#464E5F] font-semibold">
-                            pergunta
-                          </th>
+                          <th className="text-left px-4 py-3 text-[#0BB783] font-semibold w-52">campo</th>
+                          <th className="text-left px-4 py-3 text-[#464E5F] font-semibold">pergunta</th>
+                          <th className="w-10" />
                         </tr>
                       </thead>
                       <tbody>
                         {migrationFields.map((field, idx) => (
-                          <tr
-                            key={idx}
-                            className="border-b border-[#e8e8e8] hover:bg-[#F9F9F9] transition-colors"
-                          >
-                            <td className="px-4 py-3 font-mono text-[#0BB783] whitespace-nowrap">
-                              {field.campo}
+                          <tr key={idx} className="border-b border-[#e8e8e8] hover:bg-[#FAFAFA] transition-colors">
+                            <td className="px-3 py-2">
+                              <input
+                                type="text"
+                                value={field.campo}
+                                onChange={(e) =>
+                                  setMigrationFields((prev) =>
+                                    prev.map((f, i) => i === idx ? { ...f, campo: e.target.value } : f)
+                                  )
+                                }
+                                className="w-full bg-white border border-[#d0d0d0] rounded px-2 py-1 text-xs font-mono text-[#0BB783] focus:outline-none focus:ring-1 focus:ring-[#0BB783]/40 transition-colors"
+                              />
                             </td>
-                            <td className="px-4 py-3 text-[#464E5F]">
-                              {field.pergunta}
+                            <td className="px-3 py-2">
+                              <input
+                                type="text"
+                                value={field.pergunta}
+                                onChange={(e) =>
+                                  setMigrationFields((prev) =>
+                                    prev.map((f, i) => i === idx ? { ...f, pergunta: e.target.value } : f)
+                                  )
+                                }
+                                className="w-full bg-white border border-[#d0d0d0] rounded px-2 py-1 text-xs text-[#464E5F] focus:outline-none focus:ring-1 focus:ring-[#0BB783]/40 transition-colors"
+                              />
+                            </td>
+                            <td className="px-2 py-2 text-center">
+                              <button
+                                onClick={() =>
+                                  setMigrationFields((prev) => prev.filter((_, i) => i !== idx))
+                                }
+                                className="p-1 rounded hover:bg-[#F64E60]/10 text-[#b0b0bf] hover:text-[#F64E60] transition-colors"
+                                title="Remover campo"
+                              >
+                                ×
+                              </button>
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
+                    <div className="px-3 py-2 bg-[#F9F9F9] border-t border-[#e0e0e0]">
+                      <button
+                        onClick={() =>
+                          setMigrationFields((prev) => [...prev, { campo: "", pergunta: "" }])
+                        }
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0BB783]/10 hover:bg-[#0BB783]/20 text-[#0BB783] text-sm transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Adicionar campo
+                      </button>
+                    </div>
                   </div>
 
                   {/* Estrutura da Migration */}
@@ -1267,6 +1302,7 @@ ${cols}
           )}
         </div>
       )}
+      <ScrollButtons containerRef={containerRef} />
     </div>
   );
 }
