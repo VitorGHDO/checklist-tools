@@ -58,7 +58,7 @@ export interface UploadedImage {
 
 // ==================== Extrator — Checklist Type ====================
 
-export type ChecklistType = "roteiro-entrega-tecnica";
+export type ChecklistType = "roteiro-entrega-tecnica" | "revisao-entrega";
 
 // ==================== Extrator — Perguntas por Status ====================
 
@@ -94,7 +94,7 @@ export interface PerguntaAssociada {
   perguntaObrigatorio: string | null;
   valorObrigatorio: string | null;
   esconderPerguntas: number;
-  esconderQuando: number | null;  // null → omitido; 2 = ocultar no modo Compacto
+  esconderQuando: string | null;  // null → omitido; "2" = Compacto; "1;0" = revisao anomalia
   perguntaEsconderQuando: string | null;
   desativado: number;
 }

@@ -19,7 +19,7 @@ import {
   Database,
 } from "lucide-react";
 import { showToast } from "@/components/ui/toast";
-import { AI_MODELS, type UploadedImage } from "@/lib/types";
+import { AI_MODELS, type UploadedImage, type ChecklistType } from "@/lib/types";
 import type { MigrationField } from "@/app/api/generate-fields/route";
 import Image from "next/image";
 import { PerguntasStatusTab } from "./perguntas-status-tab";
@@ -38,6 +38,7 @@ interface Props {
   pdfFile: File | null;
   images: UploadedImage[];
   project: Project;
+  checklistType: ChecklistType | null;
   onOpenApiKeyModal: () => void;
 }
 
@@ -48,6 +49,7 @@ export function AiCorrectionStep({
   pdfFile,
   images,
   project,
+  checklistType,
   onOpenApiKeyModal,
 }: Props) {
   const [model, setModel] = useState("gemini-2.5-flash");
@@ -241,23 +243,30 @@ export function AiCorrectionStep({
     fd.append("additionalInstructions", instructions);
     fd.append("project", project);
     if (pageNumber) fd.append("pageNumber", String(pageNumber));
+    if (checklistType) fd.append("checklistType", checklistType);
     return fd;
   }
 
   function parseSectionsFromText(text: string): { id: string; name: string; questions: string[] }[] {
-    const sectionRegex = /^\d+\s+[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇÀÈÌÒÙÄËÏÖÜ]/;
+    const isRevisao = checklistType === "revisao-entrega";
+
+    // revisao-entrega: headers are ALL-CAPS lines (no lowercase letters)
+    // roteiro-entrega-tecnica: headers start with a number followed by an uppercase letter
+    const isSectionHeader = isRevisao
+      ? (line: string) => line.length > 2 && !/[a-záéíóúâêîôûãõçàèìòùäëïöü]/.test(line)
+      : (line: string) => /^\d+\s+[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇÀÈÌÒÙÄËÏÖÜ]/.test(line);
+
     const lines = text.split("\n");
     const sections: { id: string; name: string; questions: string[] }[] = [];
     let current: { id: string; name: string; questions: string[] } | null = null;
     for (const raw of lines) {
       const line = raw.trim();
       if (!line || line.startsWith("---")) continue;
-      if (sectionRegex.test(line)) {
+      if (isSectionHeader(line)) {
         if (current) sections.push(current);
-        const name = line
-          .replace(/^\d+\s+/, "")
-          .replace(/\s+STATUS\s*$/i, "")
-          .trim();
+        const name = isRevisao
+          ? line.trim()
+          : line.replace(/^\d+\s+/, "").replace(/\s+STATUS\s*$/i, "").trim();
         current = { id: `sec-${sections.length}`, name, questions: [] };
       } else if (current) {
         current.questions.push(line);
@@ -383,6 +392,10 @@ export function AiCorrectionStep({
     const cols = fields
       .map((f) => `            $table->integer('${f.campo}')->nullable();`)
       .join("\n");
+    const extraCols =
+      checklistType === "revisao-entrega"
+        ? "\n            $table->json('observacoes')->nullable();"
+        : "";
     return `<?php
 
 use Illuminate\\Database\\Migrations\\Migration;
@@ -394,7 +407,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('${safeTable}', function (Blueprint $table) {
-${cols}
+${cols}${extraCols}
         });
     }
 
@@ -1286,6 +1299,7 @@ ${cols}
               groups={workingGroups}
               fields={migrationFields}
               checklistId={checklistId}
+              checklistType={checklistType ?? "roteiro-entrega-tecnica"}
             />
           )}
         </div>

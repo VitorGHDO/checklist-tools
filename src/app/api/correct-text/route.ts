@@ -36,7 +36,36 @@ function detectProvider(model: string): AIProvider {
   return "gemini";
 }
 
-function buildSystemPrompt(options: CorrectionOptions, project?: string): string {
+function buildSystemPrompt(options: CorrectionOptions, project?: string, checklistType?: string): string {
+  if (checklistType === "revisao-entrega") {
+    return (
+      "Você recebeu um texto extraído por OCR de um checklist de revisão de entrega de veículos.\n" +
+      "O texto bruto contém cabeçalhos de metadados do veículo/cliente e símbolos que devem ser ignorados.\n\n" +
+      "SUA TAREFA:\n" +
+      "Retorne APENAS os títulos de grupo/seção e os itens de verificação do checklist, limpos e organizados.\n\n" +
+      "REGRAS OBRIGATÓRIAS:\n" +
+      "- IGNORE completamente linhas de metadados:\n" +
+      "  • Título do documento (ex: 'REVISÃO DE ENTREGA', 'INSPEÇÃO PRÉ-RECEBIMENTO')\n" +
+      "  • Dados do veículo: número do chassis, placa, modelo, ano, data, cliente, concessionária\n" +
+      "  • Cabeçalhos de colunas de resposta: 'OK', 'NOK', 'N/A', 'SIM', 'NÃO', 'Anomalia'\n" +
+      "  • Rodapés, assinaturas, campos de data\n" +
+      "- MANTENHA todos os títulos de grupo/seção (geralmente em caixa alta ou iniciados com número).\n" +
+      "- MANTENHA absolutamente TODOS os itens de verificação (frases curtas que descrevem o que verificar).\n" +
+      "- REMOVA símbolos do início de cada item: ●, ★, |, •, -, *, caixas de seleção (□, ☐, ✓, ✗), e similares.\n" +
+      "- Cada item deve aparecer em uma linha separada, sem símbolos e sem numeração própria.\n" +
+      "- NÃO adicione explicações, comentários, cabeçalhos extras ou formatação markdown.\n" +
+      "- Retorne APENAS o texto limpo.\n\n" +
+      "EXEMPLO DE SAÍDA ESPERADA:\n" +
+      "PREPARAÇÃO PARA REVISÃO\n" +
+      "Verificar nível de óleo do motor\n" +
+      "Verificar nível do fluido de arrefecimento\n" +
+      "...\n\n" +
+      "INSPEÇÃO VISUAL EXTERNA\n" +
+      "Verificar lataria por amassados ou arranhões\n" +
+      "Verificar estado dos pneus e pressão\n"
+    );
+  }
+
   // Prompt específico para o projeto Entrega Impecável
   if (project === "entrega-impecavel") {
     return (
@@ -101,7 +130,20 @@ function buildSystemPrompt(options: CorrectionOptions, project?: string): string
   return prompt;
 }
 
-function buildUserPrompt(text: string, project?: string, pageNumber?: number): string {
+function buildUserPrompt(text: string, project?: string, pageNumber?: number, checklistType?: string): string {
+  if (checklistType === "revisao-entrega") {
+    let prompt = "";
+    if (pageNumber && pageNumber > 0) {
+      prompt += `PÁGINA ${pageNumber} DO DOCUMENTO\n\n`;
+    }
+    prompt += "Texto bruto extraído por OCR do checklist de revisão (com metadados e símbolos a serem ignorados):\n\n";
+    prompt += "---INÍCIO DO TEXTO---\n";
+    prompt += text;
+    prompt += "\n---FIM DO TEXTO---\n\n";
+    prompt += "Retorne o texto limpo conforme as regras do sistema, mantendo apenas grupos e itens de verificação.";
+    return prompt;
+  }
+
   let prompt = "";
   if (pageNumber && pageNumber > 0) {
     prompt += `PÁGINA ${pageNumber} DO DOCUMENTO\n\n`;
@@ -197,6 +239,7 @@ export async function POST(request: NextRequest) {
     const matchImage = formData.get("matchImage") === "1";
     const additionalInstructions =
       (formData.get("additionalInstructions") as string) || "";
+    const checklistType = (formData.get("checklistType") as string) || "";
     const pageNumber = parseInt(
       (formData.get("pageNumber") as string) || "0",
       10
@@ -263,8 +306,8 @@ export async function POST(request: NextRequest) {
       pageNumber,
     };
 
-    const systemPrompt = buildSystemPrompt(options, project);
-    const userPrompt = buildUserPrompt(text, project, pageNumber);
+    const systemPrompt = buildSystemPrompt(options, project, checklistType);
+    const userPrompt = buildUserPrompt(text, project, pageNumber, checklistType);
 
     let correctedText: string;
 

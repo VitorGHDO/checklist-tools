@@ -12,7 +12,7 @@ import {
   Database,
 } from "lucide-react";
 import { showToast } from "@/components/ui/toast";
-import type { PerguntaAssociada } from "@/lib/types";
+import type { PerguntaAssociada, ChecklistType } from "@/lib/types";
 import type { MigrationField } from "@/app/api/generate-fields/route";
 
 interface WorkingGroup {
@@ -25,6 +25,7 @@ interface Props {
   groups: WorkingGroup[];
   fields: MigrationField[];
   checklistId: string;
+  checklistType: ChecklistType;
 }
 
 const TIPOS = [
@@ -53,7 +54,46 @@ function makeDefaults(
   titulo: string,
   ordemGrupo: number,
   idSuffix: string,
+  checklistType: ChecklistType = "roteiro-entrega-tecnica",
 ): PerguntaAssociada {
+  if (checklistType === "revisao-entrega") {
+    return {
+      id: idSuffix,
+      campo,
+      pergunta,
+      statusIdx,
+      tipo: "radio",
+      opcoes: "Ok;NOk;N/A",
+      valor: "1;2;0",
+      obrigatorio: 1,
+      defaultVal: "1",
+      query: "",
+      ordem,
+      tamanho: "col-12",
+      selecione: "",
+      classCor: "green;red;blue",
+      grupo,
+      ordemGrupo,
+      titulo,
+      tamanhoGrupo: "col-12",
+      boasvindas: 0,
+      editavel: 1,
+      foto: 1,
+      video: 1,
+      audio: 0,
+      extra: null,
+      utilizacao: "1;2;3;4;5;6;7;8",
+      orcamentoDigital: 0,
+      oportunidades: 0,
+      tamanhoCampo: 250,
+      perguntaObrigatorio: "",
+      valorObrigatorio: "",
+      esconderPerguntas: 1,
+      esconderQuando: null,
+      perguntaEsconderQuando: null,
+      desativado: 0,
+    };
+  }
   return {
     id: idSuffix,
     campo,
@@ -92,30 +132,44 @@ function makeDefaults(
   };
 }
 
-function buildAssociation(groups: WorkingGroup[], fields: MigrationField[]): PerguntaAssociada[] {
+function buildAssociation(
+  groups: WorkingGroup[],
+  fields: MigrationField[],
+  checklistType: ChecklistType = "roteiro-entrega-tecnica",
+): PerguntaAssociada[] {
   const result: PerguntaAssociada[] = [];
   const matchedIdx = new Set<number>();
+  const isRevisao = checklistType === "revisao-entrega";
 
   groups.forEach((group, gIdx) => {
-    const grupo = slugify(group.baseLabel);
-    const titulo = group.baseLabel;
-    const ordemGrupo = gIdx + 1;
+    const grupo = isRevisao
+      ? `G${gIdx}_${slugify(group.baseLabel).slice(0, 20)}`
+      : slugify(group.baseLabel);
+    const titulo = isRevisao ? group.baseLabel.toUpperCase() : group.baseLabel;
+    const ordemGrupo = isRevisao ? gIdx + 3 : gIdx + 1;
 
     group.questions.forEach((question, qIdx) => {
       let fi = fields.findIndex((f, i) => !matchedIdx.has(i) && f.pergunta === question);
       if (fi === -1) {
         const norm = question.trim().toLowerCase();
-        fi = fields.findIndex((f, i) => !matchedIdx.has(i) && f.pergunta.trim().toLowerCase() === norm);
+        fi = fields.findIndex(
+          (f, i) => !matchedIdx.has(i) && f.pergunta.trim().toLowerCase() === norm,
+        );
       }
       const campo = fi >= 0 ? fields[fi].campo : slugify(question);
       if (fi >= 0) matchedIdx.add(fi);
-      result.push(makeDefaults(campo, question, gIdx, qIdx + 1, grupo, titulo, ordemGrupo, `g${gIdx}-q${qIdx}`));
+      const ordem = isRevisao ? (qIdx + 1) * 10 : qIdx + 1;
+      result.push(
+        makeDefaults(campo, question, gIdx, ordem, grupo, titulo, ordemGrupo, `g${gIdx}-q${qIdx}`, checklistType),
+      );
     });
   });
 
   fields.forEach((field, i) => {
     if (!matchedIdx.has(i)) {
-      result.push(makeDefaults(field.campo, field.pergunta, -1, 1, "", "", 0, `unmatched-${i}`));
+      result.push(
+        makeDefaults(field.campo, field.pergunta, -1, 1, "", "", 0, `unmatched-${i}`, checklistType),
+      );
     }
   });
 
@@ -194,6 +248,150 @@ function buildSqlInsert(p: PerguntaAssociada, checklistId: string): string {
   return `INSERT INTO checklist_perguntas (${cols.join(",")})\n    VALUES (${vals.join(",")});`;
 }
 
+function buildRevisaoEntregaSql(
+  perguntas: PerguntaAssociada[],
+  checklistId: string,
+  groups: WorkingGroup[],
+): string {
+  const id = parseInt(checklistId || "217");
+  const esc = (s: string) => s.replace(/'/g, "''");
+  const now = new Date();
+  const ts =
+    now.getFullYear().toString() +
+    String(now.getMonth() + 1).padStart(2, "0") +
+    String(now.getDate()).padStart(2, "0") +
+    String(now.getHours()).padStart(2, "0") +
+    String(now.getMinutes()).padStart(2, "0");
+
+  const lines: string[] = [`-- Auto-generated SQL script #${ts} (Revisão de Entrega)`];
+
+  const assigned = perguntas.filter((p) => p.statusIdx >= 0);
+  const byStatus = new Map<number, PerguntaAssociada[]>();
+  assigned.forEach((p) => {
+    if (!byStatus.has(p.statusIdx)) byStatus.set(p.statusIdx, []);
+    byStatus.get(p.statusIdx)!.push(p);
+  });
+
+  let obsCounter = 1;
+
+  [...byStatus.keys()].sort((a, b) => a - b).forEach((sIdx) => {
+    const items = byStatus.get(sIdx)!.sort((a, b) => a.ordem - b.ordem);
+    const firstItem = items[0];
+    const grupo = firstItem?.grupo ?? "";
+    const ordemGrupo = firstItem?.ordemGrupo ?? sIdx + 3;
+    const titulo = firstItem?.titulo ?? "";
+    const statusNum = sIdx + 1;
+    const label = groups[sIdx]?.baseLabel || `Status ${sIdx + 1}`;
+
+    lines.push(`-- STATUS ${statusNum} — ${label}`);
+
+    // Pergunta hidden de controle no início de cada grupo
+    lines.push(
+      `INSERT INTO checklist_perguntas (checklist,status,campo,pergunta,tipo,obrigatorio,query,ordem,tamanho,selecione,class,grupo,ordemGrupo,titulo,tamanhoGrupo,boasvindas,editavel,foto,video,audio,utilizacao,orcamentoDigital,oportunidades,tamanhoCampo,esconderPerguntas,esconderQuando,desativado)\n` +
+      `    VALUES (${id},${statusNum},'observacoes','','hidden',0,'',0,'col-12','',NULL,'${esc(grupo)}',${ordemGrupo},'${esc(titulo)}','col-12',0,1,0,0,0,'1;2;3;4;5;6;7;8',0,0,250,0,'1;0',0);`,
+    );
+
+    items.forEach((p) => {
+      // Pergunta principal
+      lines.push(buildSqlInsert(p, checklistId));
+
+      // Pergunta de observação (Anomalia)
+      lines.push(
+        `INSERT INTO checklist_perguntas (checklist,status,campo,pergunta,tipo,obrigatorio,query,ordem,tamanho,selecione,class,grupo,ordemGrupo,titulo,tamanhoGrupo,boasvindas,editavel,foto,video,audio,utilizacao,orcamentoDigital,oportunidades,tamanhoCampo,esconderPerguntas,esconderQuando,perguntaEsconderQuando,desativado)\n` +
+        `    VALUES (${id},${statusNum},'observacoes_${obsCounter}','Anomalia','textarea',0,'',${p.ordem + 1},'col-12','',NULL,'${esc(grupo)}',${ordemGrupo},'${esc(titulo)}','col-12',0,1,0,0,0,'1;2;3;4;5;6;7;8',0,0,250,0,'1;0','${esc(p.campo)}',0);`,
+      );
+
+      obsCounter++;
+    });
+
+    lines.push("");
+  });
+
+  return lines.join("\n");
+}
+
+function buildRevisaoEntregaDbRows(
+  perguntas: PerguntaAssociada[],
+  checklistId: string,
+  groups: WorkingGroup[],
+): string {
+  const id = parseInt(checklistId || "217");
+  const q = (val: string | number | null) => {
+    if (val === null) return '"[NULL]"';
+    return `"${String(val).replace(/"/g, '""')}"`;
+  };
+
+  const assigned = perguntas.filter((p) => p.statusIdx >= 0);
+  const byStatus = new Map<number, PerguntaAssociada[]>();
+  assigned.forEach((p) => {
+    if (!byStatus.has(p.statusIdx)) byStatus.set(p.statusIdx, []);
+    byStatus.get(p.statusIdx)!.push(p);
+  });
+
+  const allRows: string[] = [];
+  let obsCounter = 1;
+
+  [...byStatus.keys()].sort((a, b) => a - b).forEach((sIdx) => {
+    const items = byStatus.get(sIdx)!.sort((a, b) => a.ordem - b.ordem);
+    const firstItem = items[0];
+    const grupo = firstItem?.grupo ?? "";
+    const ordemGrupo = firstItem?.ordemGrupo ?? sIdx + 3;
+    const titulo = firstItem?.titulo ?? "";
+    const statusNum = sIdx + 1;
+
+    // Hidden control row
+    allRows.push(
+      [
+        q(id), q(statusNum), q("observacoes"), q(""), q("hidden"),
+        q(null), q(null), q(0), q(null), q(""),
+        q(0), q("col-12"), q(""), q(""), q(grupo),
+        q(ordemGrupo), q(titulo), q("col-12"), q(0),
+        q(1), q(0), q(0), q(0), q(null),
+        q("1;2;3;4;5;6;7;8"), q(0), q(0),
+        q(250), q(null), q(null),
+        q(0), q("1;0"), q(null),
+        q(0),
+      ].join("\t"),
+    );
+
+    items.forEach((p) => {
+      // Principal
+      allRows.push(
+        [
+          q(id), q(statusNum), q(p.campo), q(p.pergunta), q(p.tipo),
+          q(p.opcoes), q(p.valor), q(p.obrigatorio), q(p.defaultVal), q(p.query),
+          q(p.ordem), q(p.tamanho), q(p.selecione), q(p.classCor), q(p.grupo),
+          q(p.ordemGrupo), q(p.titulo), q(p.tamanhoGrupo), q(p.boasvindas),
+          q(p.editavel), q(p.foto), q(p.video), q(p.audio), q(p.extra),
+          q(p.utilizacao), q(p.orcamentoDigital), q(p.oportunidades),
+          q(p.tamanhoCampo), q(p.perguntaObrigatorio), q(p.valorObrigatorio),
+          q(p.esconderPerguntas), q(p.esconderQuando), q(p.perguntaEsconderQuando),
+          q(p.desativado),
+        ].join("\t"),
+      );
+
+      // Anomalia
+      allRows.push(
+        [
+          q(id), q(statusNum), q(`observacoes_${obsCounter}`), q("Anomalia"), q("textarea"),
+          q(null), q(null), q(0), q(null), q(""),
+          q(p.ordem + 1), q("col-12"), q(""), q(null), q(grupo),
+          q(ordemGrupo), q(titulo), q("col-12"), q(0),
+          q(1), q(0), q(0), q(0), q(null),
+          q("1;2;3;4;5;6;7;8"), q(0), q(0),
+          q(250), q(null), q(null),
+          q(0), q("1;0"), q(p.campo),
+          q(0),
+        ].join("\t"),
+      );
+
+      obsCounter++;
+    });
+  });
+
+  return allRows.join("\n");
+}
+
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 interface PerguntaCardProps {
@@ -207,6 +405,7 @@ interface PerguntaCardProps {
   onMoveUp: () => void;
   onMoveDown: () => void;
   onChangeStatus: (statusIdx: number) => void;
+  checklistType: ChecklistType;
 }
 
 function PerguntaCard({
@@ -220,8 +419,9 @@ function PerguntaCard({
   onMoveUp,
   onMoveDown,
   onChangeStatus,
+  checklistType,
 }: PerguntaCardProps) {
-  const isCompacto = p.esconderQuando === 2;
+  const isCompacto = p.esconderQuando === "2";
   const hasOpcoes = ["radio", "select"].includes(p.tipo);
 
   return (
@@ -252,20 +452,22 @@ function PerguntaCard({
           className="flex-1 min-w-0 bg-white border border-[#d0d0d0] rounded px-2 py-1 text-xs font-mono text-[#0BB783] focus:outline-none focus:ring-1 focus:ring-[#0BB783]/40 transition-colors"
           placeholder="nome_do_campo"
         />
-        <label className="flex items-center gap-1.5 cursor-pointer flex-shrink-0 select-none">
-          <input
-            type="checkbox"
-            checked={isCompacto}
-            onChange={(e) => onUpdate({ esconderQuando: e.target.checked ? 2 : null })}
-            className="rounded border-[#d0d0d0] accent-[#FFB822]"
-          />
-          <span className="text-xs text-[#80808F]">Compacto</span>
-          {isCompacto && (
-            <span className="flex items-center gap-0.5 px-1.5 py-0.5 bg-[#FFB822]/15 text-[#FFB822] rounded text-xs font-semibold">
-              <EyeOff className="w-3 h-3" />
-            </span>
-          )}
-        </label>
+        {checklistType !== "revisao-entrega" && (
+          <label className="flex items-center gap-1.5 cursor-pointer flex-shrink-0 select-none">
+            <input
+              type="checkbox"
+              checked={isCompacto}
+              onChange={(e) => onUpdate({ esconderQuando: e.target.checked ? "2" : null })}
+              className="rounded border-[#d0d0d0] accent-[#FFB822]"
+            />
+            <span className="text-xs text-[#80808F]">Compacto</span>
+            {isCompacto && (
+              <span className="flex items-center gap-0.5 px-1.5 py-0.5 bg-[#FFB822]/15 text-[#FFB822] rounded text-xs font-semibold">
+                <EyeOff className="w-3 h-3" />
+              </span>
+            )}
+          </label>
+        )}
         <button
           onClick={onToggleExpand}
           className="flex-shrink-0 p-1 rounded hover:bg-[#e8e8e8] text-[#80808F] transition-colors"
@@ -310,9 +512,15 @@ function PerguntaCard({
                 const tipo = e.target.value;
                 const patch: Partial<PerguntaAssociada> = { tipo };
                 if (tipo === "radio") {
-                  patch.opcoes = "Explicado;Não Explicado;N/A";
-                  patch.valor = "1;2;3";
-                  patch.classCor = "green;red";
+                  if (checklistType === "revisao-entrega") {
+                    patch.opcoes = "Ok;NOk;N/A";
+                    patch.valor = "1;2;0";
+                    patch.classCor = "green;red;blue";
+                  } else {
+                    patch.opcoes = "Explicado;Não Explicado;N/A";
+                    patch.valor = "1;2;3";
+                    patch.classCor = "green;red";
+                  }
                 } else if (["text", "textarea", "hidden", "email", "tel", "cpfxcnpj", "datahora", "date", "number"].includes(tipo)) {
                   patch.opcoes = null;
                   patch.valor = null;
@@ -424,6 +632,7 @@ interface GroupSectionProps {
   firstGrupo: string;
   firstTitulo: string;
   firstOrdemGrupo: number;
+  checklistType: ChecklistType;
 }
 
 function GroupSection({
@@ -441,9 +650,10 @@ function GroupSection({
   firstGrupo,
   firstTitulo,
   firstOrdemGrupo,
+  checklistType,
 }: GroupSectionProps) {
   const [collapsed, setCollapsed] = useState(true);
-  const compactoCount = perguntas.filter((p) => p.esconderQuando === 2).length;
+  const compactoCount = perguntas.filter((p) => p.esconderQuando === "2").length;
 
   return (
     <div className="border border-[#e0e0e0] rounded-xl overflow-hidden">
@@ -521,6 +731,7 @@ function GroupSection({
                 onMoveUp={() => onMoveUp(p.id)}
                 onMoveDown={() => onMoveDown(p.id)}
                 onChangeStatus={(idx2) => onChangeStatus(p.id, idx2)}
+                checklistType={checklistType}
               />
             ))
           )}
@@ -532,7 +743,7 @@ function GroupSection({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function PerguntasStatusTab({ groups, fields, checklistId }: Props) {
+export function PerguntasStatusTab({ groups, fields, checklistId, checklistType }: Props) {
   const [perguntas, setPerguntas] = useState<PerguntaAssociada[]>([]);
   const [initialized, setInitialized] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -545,7 +756,7 @@ export function PerguntasStatusTab({ groups, fields, checklistId }: Props) {
     if (groups.length === 0 || fields.length === 0) return;
 
     if (!initialized) {
-      setPerguntas(buildAssociation(groups, fields));
+      setPerguntas(buildAssociation(groups, fields, checklistType));
       setInitialized(true);
       return;
     }
@@ -563,7 +774,7 @@ export function PerguntasStatusTab({ groups, fields, checklistId }: Props) {
         if (!existingPerguntas.has(f.pergunta)) {
           next = [
             ...next,
-            makeDefaults(f.campo, f.pergunta, -1, next.length + 1, "", "", 0, `synced-${i}-${Date.now()}`),
+            makeDefaults(f.campo, f.pergunta, -1, next.length + 1, "", "", 0, `synced-${i}-${Date.now()}`, checklistType),
           ];
         }
       });
@@ -579,13 +790,13 @@ export function PerguntasStatusTab({ groups, fields, checklistId }: Props) {
   }, [fields, initialized, groups]);
 
   const resetAssociation = useCallback(() => {
-    setPerguntas(buildAssociation(groups, fields));
+    setPerguntas(buildAssociation(groups, fields, checklistType));
     setShowDb(false);
     setDbOutput("");
     setShowSql(false);
     setSqlOutput("");
     showToast("Associação reiniciada!", "success");
-  }, [groups, fields]);
+  }, [groups, fields, checklistType]);
 
   function update(id: string, patch: Partial<PerguntaAssociada>) {
     setPerguntas((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
@@ -626,9 +837,19 @@ export function PerguntasStatusTab({ groups, fields, checklistId }: Props) {
   function changeStatus(id: string, newStatusIdx: number) {
     setPerguntas((prev) => {
       const group = newStatusIdx >= 0 ? groups[newStatusIdx] : null;
-      const grupo = group ? slugify(group.baseLabel) : "";
-      const titulo = group ? group.baseLabel : "";
-      const ordemGrupo = newStatusIdx >= 0 ? newStatusIdx + 1 : 0;
+      const isRevisao = checklistType === "revisao-entrega";
+      const grupo = group
+        ? isRevisao
+          ? `G${newStatusIdx}_${slugify(group.baseLabel).slice(0, 20)}`
+          : slugify(group.baseLabel)
+        : "";
+      const titulo = group
+        ? isRevisao
+          ? group.baseLabel.toUpperCase()
+          : group.baseLabel
+        : "";
+      const ordemGrupo =
+        newStatusIdx >= 0 ? (isRevisao ? newStatusIdx + 3 : newStatusIdx + 1) : 0;
       const targetItems = prev.filter((x) => x.statusIdx === newStatusIdx);
       const maxOrd = targetItems.length > 0 ? Math.max(...targetItems.map((x) => x.ordem)) : 0;
       return prev.map((x) =>
@@ -659,6 +880,12 @@ export function PerguntasStatusTab({ groups, fields, checklistId }: Props) {
   }
 
   function generateSql() {
+    if (checklistType === "revisao-entrega") {
+      setSqlOutput(buildRevisaoEntregaSql(perguntas, checklistId, groups));
+      setShowSql(true);
+      return;
+    }
+
     const now = new Date();
     const ts =
       now.getFullYear().toString() +
@@ -689,7 +916,7 @@ export function PerguntasStatusTab({ groups, fields, checklistId }: Props) {
   }
 
   const unassigned = perguntas.filter((p) => p.statusIdx === -1);
-  const compactoTotal = perguntas.filter((p) => p.esconderQuando === 2).length;
+  const compactoTotal = perguntas.filter((p) => p.esconderQuando === "2").length;
 
   if (!initialized) {
     return (
@@ -733,7 +960,11 @@ export function PerguntasStatusTab({ groups, fields, checklistId }: Props) {
           </button>
           <button
             onClick={() => {
-              setDbOutput(buildDbRows(perguntas, checklistId));
+              setDbOutput(
+                checklistType === "revisao-entrega"
+                  ? buildRevisaoEntregaDbRows(perguntas, checklistId, groups)
+                  : buildDbRows(perguntas, checklistId),
+              );
               setShowDb(true);
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#22B9FF]/10 hover:bg-[#22B9FF]/20 text-[#22B9FF] text-sm font-medium transition-colors border border-[#22B9FF]/30"
@@ -774,6 +1005,7 @@ export function PerguntasStatusTab({ groups, fields, checklistId }: Props) {
             firstGrupo={first?.grupo ?? slugify(group.baseLabel)}
             firstTitulo={first?.titulo ?? group.baseLabel}
             firstOrdemGrupo={first?.ordemGrupo ?? gIdx + 1}
+            checklistType={checklistType}
           />
         );
       })}
@@ -801,6 +1033,7 @@ export function PerguntasStatusTab({ groups, fields, checklistId }: Props) {
                 onMoveUp={() => moveUp(p.id)}
                 onMoveDown={() => moveDown(p.id)}
                 onChangeStatus={(i) => changeStatus(p.id, i)}
+                checklistType={checklistType}
               />
             ))}
           </div>

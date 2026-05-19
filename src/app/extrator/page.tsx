@@ -39,11 +39,11 @@ const CHECKLIST_TYPES: {
     available: false,
   },
   {
-    id: "revisao-entrega",
+    id: "revisao-entrega" as ChecklistType,
     name: "Revisão de Entrega",
     description: "Revisão dos itens antes da entrega ao cliente",
     icon: ClipboardCheck,
-    available: false,
+    available: true,
   },
   {
     id: "inspecao-pre-entrega",
@@ -323,6 +323,7 @@ export default function ExtratorPage() {
                   pdfFile={pdfFile}
                   images={images}
                   project="entrega-impecavel"
+                  checklistType={checklistType}
                   onOpenApiKeyModal={() => setShowApiModal(true)}
                 />
               </div>
