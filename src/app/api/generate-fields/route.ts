@@ -62,8 +62,16 @@ O QUE IGNORAR:
 - Linhas vazias
 - Separadores como "--- Página ---"`;
 
-// Gemini aceita array direto; OpenAI com json_object EXIGE um objeto wrapper.
-const SYSTEM_PROMPT = BASE_PROMPT_BODY + `
+const IPE_EXTRA_RULES = `
+- O texto contém seções identificadas por letras (A, B, C, D, E) no formato "X - TÍTULO DA SEÇÃO"
+- Cada campo DEVE ser prefixado com a letra da seção em minúsculo + underscore
+- Exemplos: item da seção A → "a_verificar_checklists", seção B → "b_verificar_dados", seção C → "c_verificar_lataria"
+- Use a letra da seção mais próxima acima do item para determinar o prefixo
+- NUNCA repita o mesmo nome de campo`;
+
+function buildSystemPrompt(checklistType?: string): string {
+  const extra = checklistType === "inspecao-pre-entrega" ? IPE_EXTRA_RULES : "";
+  return BASE_PROMPT_BODY + extra + `
 
 FORMATO DE SAÍDA:
 Retorne APENAS um JSON válido (array), sem explicações, sem markdown, sem código de bloco:
@@ -71,8 +79,11 @@ Retorne APENAS um JSON válido (array), sem explicações, sem markdown, sem có
   {"campo": "nome_do_campo", "pergunta": "Texto completo do item de checklist"},
   ...
 ]`;
+}
 
-const OPENAI_SYSTEM_PROMPT = BASE_PROMPT_BODY + `
+function buildOpenAISystemPrompt(checklistType?: string): string {
+  const extra = checklistType === "inspecao-pre-entrega" ? IPE_EXTRA_RULES : "";
+  return BASE_PROMPT_BODY + extra + `
 
 FORMATO DE SAÍDA OBRIGATÓRIO:
 Retorne APENAS um objeto JSON no formato {"fields": [...]}, sem explicações ou markdown:
@@ -80,16 +91,18 @@ Retorne APENAS um objeto JSON no formato {"fields": [...]}, sem explicações ou
   {"campo": "nome_do_campo", "pergunta": "Texto completo do item de checklist"},
   ...
 ]}`;
+}
 
 async function callGemini(
   apiKey: string,
   model: string,
-  text: string
+  text: string,
+  checklistType?: string,
 ): Promise<string> {
   const genAI = new GoogleGenerativeAI(apiKey);
   const genModel = genAI.getGenerativeModel({ model });
 
-  const prompt = `${SYSTEM_PROMPT}\n\nTexto do checklist corrigido:\n\n${text}\n\nRetorne o JSON agora:`;
+  const prompt = `${buildSystemPrompt(checklistType)}\n\nTexto do checklist corrigido:\n\n${text}\n\nRetorne o JSON agora:`;
   const result = await genModel.generateContent(prompt);
   return result.response.text();
 }
@@ -97,14 +110,15 @@ async function callGemini(
 async function callOpenAI(
   apiKey: string,
   model: string,
-  text: string
+  text: string,
+  checklistType?: string,
 ): Promise<string> {
   const openai = new OpenAI({ apiKey });
 
   const response = await openai.chat.completions.create({
     model,
     messages: [
-      { role: "system", content: OPENAI_SYSTEM_PROMPT },
+      { role: "system", content: buildOpenAISystemPrompt(checklistType) },
       {
         role: "user",
         content: `Texto do checklist corrigido:\n\n${text}\n\nRetorne o objeto JSON {"fields": [...]} agora:`,
@@ -159,10 +173,11 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    const { text, model = "gemini-2.5-flash", apiKey } = body as {
+    const { text, model = "gemini-2.5-flash", apiKey, checklistType } = body as {
       text: string;
       model: string;
       apiKey: string;
+      checklistType?: string;
     };
 
     if (!text?.trim()) {
@@ -192,9 +207,9 @@ export async function POST(request: NextRequest) {
 
     let raw: string;
     if (provider === "gemini") {
-      raw = await withRetry(() => callGemini(apiKey, model, text));
+      raw = await withRetry(() => callGemini(apiKey, model, text, checklistType));
     } else {
-      raw = await withRetry(() => callOpenAI(apiKey, model, text));
+      raw = await withRetry(() => callOpenAI(apiKey, model, text, checklistType));
     }
 
     const fields = parseFields(raw);

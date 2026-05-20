@@ -37,6 +37,36 @@ function detectProvider(model: string): AIProvider {
 }
 
 function buildSystemPrompt(options: CorrectionOptions, project?: string, checklistType?: string): string {
+  if (checklistType === "inspecao-pre-entrega") {
+    return (
+      "Você recebeu um texto extraído por OCR de um checklist de Inspeção Pré-Entrega de veículos (FML-VEN-09).\n" +
+      "O texto bruto contém metadados do veículo/cliente, cabeçalhos de colunas e símbolos que devem ser ignorados.\n\n" +
+      "SUA TAREFA:\n" +
+      "Retorne APENAS os títulos de seção (A -, B -, C -...) e os itens de verificação, limpos e organizados.\n\n" +
+      "REGRAS OBRIGATÓRIAS:\n" +
+      "- IGNORE completamente linhas de metadados:\n" +
+      "  • Título do documento (ex: 'INSPEÇÃO PRÉ-ENTREGA', 'FML-VEN-09', 'Stellantis')\n" +
+      "  • Dados do veículo: chassis, placa, modelo, ano, data, cliente, concessionária, VIN\n" +
+      "  • Cabeçalhos de colunas de resposta: 'OK', 'NOK', 'N/A', 'SIM', 'NÃO', 'Anomalia', 'Volts', '%'\n" +
+      "  • Rodapés, assinaturas, campos de data e hora\n" +
+      "  • Linhas com apenas números, datas ou referências de página\n" +
+      "- MANTENHA todos os títulos de seção no formato exato 'X - TÍTULO EM MAIÚSCULAS' onde X é a letra (A, B, C, D, E).\n" +
+      "- MANTENHA absolutamente TODOS os itens de verificação (frases curtas que descrevem o que verificar).\n" +
+      "- REMOVA símbolos do início de cada item: ●, ★, |, •, -, *, caixas de seleção (□, ☐, ✓, ✗), e similares.\n" +
+      "- Cada item deve aparecer em uma linha separada, sem símbolos e sem numeração própria.\n" +
+      "- NÃO adicione explicações, comentários, cabeçalhos extras ou formatação markdown.\n" +
+      "- Retorne APENAS o texto limpo.\n\n" +
+      "EXEMPLO DE SAÍDA ESPERADA:\n" +
+      "A - ANTES DE INICIAR O CHECKLIST\n" +
+      "Verificar checklists preenchidos\n" +
+      "Verificar condições gerais do veículo\n" +
+      "...\n\n" +
+      "B - DOCUMENTAÇÃO E KIT DE BORDO\n" +
+      "Verificar dados da nota fiscal\n" +
+      "Verificar documentação do veículo\n"
+    );
+  }
+
   if (checklistType === "revisao-entrega") {
     return (
       "Você recebeu um texto extraído por OCR de um checklist de revisão de entrega de veículos.\n" +
@@ -131,6 +161,19 @@ function buildSystemPrompt(options: CorrectionOptions, project?: string, checkli
 }
 
 function buildUserPrompt(text: string, project?: string, pageNumber?: number, checklistType?: string): string {
+  if (checklistType === "inspecao-pre-entrega") {
+    let prompt = "";
+    if (pageNumber && pageNumber > 0) {
+      prompt += `PÁGINA ${pageNumber} DO DOCUMENTO\n\n`;
+    }
+    prompt += "Texto bruto extraído por OCR do checklist de Inspeção Pré-Entrega (com metadados e símbolos a serem ignorados):\n\n";
+    prompt += "---INÍCIO DO TEXTO---\n";
+    prompt += text;
+    prompt += "\n---FIM DO TEXTO---\n\n";
+    prompt += "Retorne o texto limpo conforme as regras do sistema, mantendo apenas seções (A -, B -...) e itens de verificação.";
+    return prompt;
+  }
+
   if (checklistType === "revisao-entrega") {
     let prompt = "";
     if (pageNumber && pageNumber > 0) {

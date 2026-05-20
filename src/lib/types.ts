@@ -58,7 +58,7 @@ export interface UploadedImage {
 
 // ==================== Extrator — Checklist Type ====================
 
-export type ChecklistType = "roteiro-entrega-tecnica" | "revisao-entrega";
+export type ChecklistType = "roteiro-entrega-tecnica" | "revisao-entrega" | "inspecao-pre-entrega";
 
 // ==================== Extrator — Perguntas por Status ====================
 

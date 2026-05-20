@@ -45,6 +45,20 @@ function slugify(text: string): string {
     .slice(0, 40);
 }
 
+function extractSectionLetter(baseLabel: string, fallbackIdx: number): string {
+  const match = /^([A-E])\s*-/i.exec(baseLabel);
+  return match?.[1]?.toUpperCase() ?? String.fromCharCode(65 + fallbackIdx);
+}
+
+function buildIPEGroupFields(group: WorkingGroup, gIdx: number): { grupo: string; titulo: string; ordemGrupo: number } {
+  const letter = extractSectionLetter(group.baseLabel, gIdx);
+  const titlePart = group.baseLabel.replace(/^[A-E]\s*-\s*/i, "");
+  const grupo = `G${letter}_${slugify(titlePart).slice(0, 20)}`;
+  const titulo = group.baseLabel.toUpperCase();
+  const ordemGrupo = letter.charCodeAt(0) - 64; // A=1, B=2, C=3, D=4, E=5
+  return { grupo, titulo, ordemGrupo };
+}
+
 function makeDefaults(
   campo: string,
   pergunta: string,
@@ -56,6 +70,44 @@ function makeDefaults(
   idSuffix: string,
   checklistType: ChecklistType = "roteiro-entrega-tecnica",
 ): PerguntaAssociada {
+  if (checklistType === "inspecao-pre-entrega") {
+    return {
+      id: idSuffix,
+      campo,
+      pergunta,
+      statusIdx,
+      tipo: "radio",
+      opcoes: "Ok;NOk;N/A",
+      valor: "1;2;0",
+      obrigatorio: 1,
+      defaultVal: "1",
+      query: "",
+      ordem,
+      tamanho: "col-12",
+      selecione: "",
+      classCor: "green;red;blue",
+      grupo,
+      ordemGrupo,
+      titulo,
+      tamanhoGrupo: "col-12",
+      boasvindas: 0,
+      editavel: 1,
+      foto: 1,
+      video: 1,
+      audio: 0,
+      extra: null,
+      utilizacao: "1",
+      orcamentoDigital: 0,
+      oportunidades: 0,
+      tamanhoCampo: 250,
+      perguntaObrigatorio: "",
+      valorObrigatorio: "",
+      esconderPerguntas: 1,
+      esconderQuando: null,
+      perguntaEsconderQuando: null,
+      desativado: 0,
+    };
+  }
   if (checklistType === "revisao-entrega") {
     return {
       id: idSuffix,
@@ -140,13 +192,26 @@ function buildAssociation(
   const result: PerguntaAssociada[] = [];
   const matchedIdx = new Set<number>();
   const isRevisao = checklistType === "revisao-entrega";
+  const isIPE = checklistType === "inspecao-pre-entrega";
+
+  let globalOrdCounter = 0; // used only for IPE — ordem is continuous across all groups
 
   groups.forEach((group, gIdx) => {
-    const grupo = isRevisao
-      ? `G${gIdx}_${slugify(group.baseLabel).slice(0, 20)}`
-      : slugify(group.baseLabel);
-    const titulo = isRevisao ? group.baseLabel.toUpperCase() : group.baseLabel;
-    const ordemGrupo = isRevisao ? gIdx + 3 : gIdx + 1;
+    let grupo: string;
+    let titulo: string;
+    let ordemGrupo: number;
+
+    if (isIPE) {
+      ({ grupo, titulo, ordemGrupo } = buildIPEGroupFields(group, gIdx));
+    } else if (isRevisao) {
+      grupo = `G${gIdx}_${slugify(group.baseLabel).slice(0, 20)}`;
+      titulo = group.baseLabel.toUpperCase();
+      ordemGrupo = gIdx + 3;
+    } else {
+      grupo = slugify(group.baseLabel);
+      titulo = group.baseLabel;
+      ordemGrupo = gIdx + 1;
+    }
 
     group.questions.forEach((question, qIdx) => {
       let fi = fields.findIndex((f, i) => !matchedIdx.has(i) && f.pergunta === question);
@@ -158,7 +223,17 @@ function buildAssociation(
       }
       const campo = fi >= 0 ? fields[fi].campo : slugify(question);
       if (fi >= 0) matchedIdx.add(fi);
-      const ordem = isRevisao ? (qIdx + 1) * 10 : qIdx + 1;
+
+      let ordem: number;
+      if (isIPE) {
+        globalOrdCounter++;
+        ordem = globalOrdCounter * 10;
+      } else if (isRevisao) {
+        ordem = (qIdx + 1) * 10;
+      } else {
+        ordem = qIdx + 1;
+      }
+
       result.push(
         makeDefaults(campo, question, gIdx, ordem, grupo, titulo, ordemGrupo, `g${gIdx}-q${qIdx}`, checklistType),
       );
@@ -310,6 +385,175 @@ function buildRevisaoEntregaSql(
   return lines.join("\n");
 }
 
+function buildInspecaoPreEntregaSql(
+  perguntas: PerguntaAssociada[],
+  checklistId: string,
+  groups: WorkingGroup[],
+): string {
+  const id = parseInt(checklistId || "217");
+  const esc = (s: string) => s.replace(/'/g, "''");
+  const now = new Date();
+  const ts =
+    now.getFullYear().toString() +
+    String(now.getMonth() + 1).padStart(2, "0") +
+    String(now.getDate()).padStart(2, "0") +
+    String(now.getHours()).padStart(2, "0") +
+    String(now.getMinutes()).padStart(2, "0");
+
+  const lines: string[] = [`-- Auto-generated SQL script #${ts} (Inspeção Pré-Entrega)`];
+
+  const assigned = perguntas.filter((p) => p.statusIdx >= 0);
+  const byStatus = new Map<number, PerguntaAssociada[]>();
+  assigned.forEach((p) => {
+    if (!byStatus.has(p.statusIdx)) byStatus.set(p.statusIdx, []);
+    byStatus.get(p.statusIdx)!.push(p);
+  });
+
+  let obsCounter = 1;
+
+  [...byStatus.keys()].sort((a, b) => a - b).forEach((sIdx) => {
+    const items = byStatus.get(sIdx)!.sort((a, b) => a.ordem - b.ordem);
+    const firstItem = items[0];
+    const grupo = firstItem?.grupo ?? "";
+    const ordemGrupo = firstItem?.ordemGrupo ?? sIdx + 1;
+    const titulo = firstItem?.titulo ?? "";
+    const statusNum = sIdx + 1;
+    const label = groups[sIdx]?.baseLabel || `Status ${sIdx + 1}`;
+
+    lines.push(`-- STATUS ${statusNum} — ${label}`);
+
+    // Hidden control row (utilizacao="1")
+    lines.push(
+      `INSERT INTO checklist_perguntas (checklist,status,campo,pergunta,tipo,obrigatorio,query,ordem,tamanho,selecione,class,grupo,ordemGrupo,titulo,tamanhoGrupo,boasvindas,editavel,foto,video,audio,utilizacao,orcamentoDigital,oportunidades,tamanhoCampo,esconderPerguntas,esconderQuando,desativado)\n` +
+      `    VALUES (${id},${statusNum},'observacoes','','hidden',0,'',0,'col-12','',NULL,'${esc(grupo)}',${ordemGrupo},'${esc(titulo)}','col-12',0,1,0,0,0,'1',0,0,250,0,'1;0',0);`,
+    );
+
+    items.forEach((p) => {
+      // Principal question (utilizacao is "1" in PerguntaAssociada for IPE)
+      lines.push(buildSqlInsert(p, checklistId));
+
+      if (p.tipo === "text") {
+        // text → hidden observation (no esconderQuando, no perguntaEsconderQuando)
+        lines.push(
+          `INSERT INTO checklist_perguntas (checklist,status,campo,pergunta,tipo,obrigatorio,query,ordem,tamanho,selecione,class,grupo,ordemGrupo,titulo,tamanhoGrupo,boasvindas,editavel,foto,video,audio,utilizacao,orcamentoDigital,oportunidades,tamanhoCampo,esconderPerguntas,desativado)\n` +
+          `    VALUES (${id},${statusNum},'observacoes_${obsCounter}','Anomalia','hidden',0,'',${p.ordem + 1},'col-12','',NULL,'${esc(grupo)}',${ordemGrupo},'${esc(titulo)}','col-12',0,1,0,0,0,'1',0,0,250,0,0);`,
+        );
+      } else {
+        // radio → textarea Anomalia (esconderQuando="1;0", perguntaEsconderQuando=campo)
+        lines.push(
+          `INSERT INTO checklist_perguntas (checklist,status,campo,pergunta,tipo,obrigatorio,query,ordem,tamanho,selecione,class,grupo,ordemGrupo,titulo,tamanhoGrupo,boasvindas,editavel,foto,video,audio,utilizacao,orcamentoDigital,oportunidades,tamanhoCampo,esconderPerguntas,esconderQuando,perguntaEsconderQuando,desativado)\n` +
+          `    VALUES (${id},${statusNum},'observacoes_${obsCounter}','Anomalia','textarea',0,'',${p.ordem + 1},'col-12','',NULL,'${esc(grupo)}',${ordemGrupo},'${esc(titulo)}','col-12',0,1,0,0,0,'1',0,0,250,0,'1;0','${esc(p.campo)}',0);`,
+        );
+      }
+
+      obsCounter++;
+    });
+
+    lines.push("");
+  });
+
+  return lines.join("\n");
+}
+
+function buildInspecaoPreEntregaDbRows(
+  perguntas: PerguntaAssociada[],
+  checklistId: string,
+  groups: WorkingGroup[],
+): string {
+  const id = parseInt(checklistId || "217");
+  const q = (val: string | number | null) => {
+    if (val === null) return '"[NULL]"';
+    return `"${String(val).replace(/"/g, '""')}"`;
+  };
+
+  const assigned = perguntas.filter((p) => p.statusIdx >= 0);
+  const byStatus = new Map<number, PerguntaAssociada[]>();
+  assigned.forEach((p) => {
+    if (!byStatus.has(p.statusIdx)) byStatus.set(p.statusIdx, []);
+    byStatus.get(p.statusIdx)!.push(p);
+  });
+
+  const allRows: string[] = [];
+  let obsCounter = 1;
+
+  [...byStatus.keys()].sort((a, b) => a - b).forEach((sIdx) => {
+    const items = byStatus.get(sIdx)!.sort((a, b) => a.ordem - b.ordem);
+    const firstItem = items[0];
+    const grupo = firstItem?.grupo ?? "";
+    const ordemGrupo = firstItem?.ordemGrupo ?? sIdx + 1;
+    const titulo = firstItem?.titulo ?? "";
+    const statusNum = sIdx + 1;
+
+    // Hidden control row (34 cols, utilizacao="1")
+    allRows.push(
+      [
+        q(id), q(statusNum), q("observacoes"), q(""), q("hidden"),
+        q(null), q(null), q(0), q(null), q(""),
+        q(0), q("col-12"), q(""), q(""), q(grupo),
+        q(ordemGrupo), q(titulo), q("col-12"), q(0),
+        q(1), q(0), q(0), q(0), q(null),
+        q("1"), q(0), q(0),
+        q(250), q(null), q(null),
+        q(0), q("1;0"), q(null),
+        q(0),
+      ].join("\t"),
+    );
+
+    items.forEach((p) => {
+      // Principal (uses p.utilizacao = "1")
+      allRows.push(
+        [
+          q(id), q(statusNum), q(p.campo), q(p.pergunta), q(p.tipo),
+          q(p.opcoes), q(p.valor), q(p.obrigatorio), q(p.defaultVal), q(p.query),
+          q(p.ordem), q(p.tamanho), q(p.selecione), q(p.classCor), q(p.grupo),
+          q(p.ordemGrupo), q(p.titulo), q(p.tamanhoGrupo), q(p.boasvindas),
+          q(p.editavel), q(p.foto), q(p.video), q(p.audio), q(p.extra),
+          q(p.utilizacao), q(p.orcamentoDigital), q(p.oportunidades),
+          q(p.tamanhoCampo), q(p.perguntaObrigatorio), q(p.valorObrigatorio),
+          q(p.esconderPerguntas), q(p.esconderQuando), q(p.perguntaEsconderQuando),
+          q(p.desativado),
+        ].join("\t"),
+      );
+
+      if (p.tipo === "text") {
+        // text → hidden observation (esconderQuando=null, perguntaEsconderQuando=null)
+        allRows.push(
+          [
+            q(id), q(statusNum), q(`observacoes_${obsCounter}`), q("Anomalia"), q("hidden"),
+            q(null), q(null), q(0), q(null), q(""),
+            q(p.ordem + 1), q("col-12"), q(""), q(null), q(grupo),
+            q(ordemGrupo), q(titulo), q("col-12"), q(0),
+            q(1), q(0), q(0), q(0), q(null),
+            q("1"), q(0), q(0),
+            q(250), q(null), q(null),
+            q(0), q(null), q(null),
+            q(0),
+          ].join("\t"),
+        );
+      } else {
+        // radio → textarea Anomalia (esconderQuando="1;0", perguntaEsconderQuando=campo)
+        allRows.push(
+          [
+            q(id), q(statusNum), q(`observacoes_${obsCounter}`), q("Anomalia"), q("textarea"),
+            q(null), q(null), q(0), q(null), q(""),
+            q(p.ordem + 1), q("col-12"), q(""), q(null), q(grupo),
+            q(ordemGrupo), q(titulo), q("col-12"), q(0),
+            q(1), q(0), q(0), q(0), q(null),
+            q("1"), q(0), q(0),
+            q(250), q(null), q(null),
+            q(0), q("1;0"), q(p.campo),
+            q(0),
+          ].join("\t"),
+        );
+      }
+
+      obsCounter++;
+    });
+  });
+
+  return allRows.join("\n");
+}
+
 function buildRevisaoEntregaDbRows(
   perguntas: PerguntaAssociada[],
   checklistId: string,
@@ -452,7 +696,7 @@ function PerguntaCard({
           className="flex-1 min-w-0 bg-white border border-[#d0d0d0] rounded px-2 py-1 text-xs font-mono text-[#0BB783] focus:outline-none focus:ring-1 focus:ring-[#0BB783]/40 transition-colors"
           placeholder="nome_do_campo"
         />
-        {checklistType !== "revisao-entrega" && (
+        {checklistType === "roteiro-entrega-tecnica" && (
           <label className="flex items-center gap-1.5 cursor-pointer flex-shrink-0 select-none">
             <input
               type="checkbox"
@@ -512,7 +756,7 @@ function PerguntaCard({
                 const tipo = e.target.value;
                 const patch: Partial<PerguntaAssociada> = { tipo };
                 if (tipo === "radio") {
-                  if (checklistType === "revisao-entrega") {
+                  if (checklistType === "revisao-entrega" || checklistType === "inspecao-pre-entrega") {
                     patch.opcoes = "Ok;NOk;N/A";
                     patch.valor = "1;2;0";
                     patch.classCor = "green;red;blue";
@@ -838,18 +1082,30 @@ export function PerguntasStatusTab({ groups, fields, checklistId, checklistType 
     setPerguntas((prev) => {
       const group = newStatusIdx >= 0 ? groups[newStatusIdx] : null;
       const isRevisao = checklistType === "revisao-entrega";
-      const grupo = group
-        ? isRevisao
-          ? `G${newStatusIdx}_${slugify(group.baseLabel).slice(0, 20)}`
-          : slugify(group.baseLabel)
-        : "";
-      const titulo = group
-        ? isRevisao
-          ? group.baseLabel.toUpperCase()
-          : group.baseLabel
-        : "";
-      const ordemGrupo =
-        newStatusIdx >= 0 ? (isRevisao ? newStatusIdx + 3 : newStatusIdx + 1) : 0;
+      const isIPE = checklistType === "inspecao-pre-entrega";
+
+      let grupo: string;
+      let titulo: string;
+      let ordemGrupo: number;
+
+      if (group) {
+        if (isIPE) {
+          ({ grupo, titulo, ordemGrupo } = buildIPEGroupFields(group, newStatusIdx));
+        } else if (isRevisao) {
+          grupo = `G${newStatusIdx}_${slugify(group.baseLabel).slice(0, 20)}`;
+          titulo = group.baseLabel.toUpperCase();
+          ordemGrupo = newStatusIdx + 3;
+        } else {
+          grupo = slugify(group.baseLabel);
+          titulo = group.baseLabel;
+          ordemGrupo = newStatusIdx + 1;
+        }
+      } else {
+        grupo = "";
+        titulo = "";
+        ordemGrupo = 0;
+      }
+
       const targetItems = prev.filter((x) => x.statusIdx === newStatusIdx);
       const maxOrd = targetItems.length > 0 ? Math.max(...targetItems.map((x) => x.ordem)) : 0;
       return prev.map((x) =>
@@ -886,6 +1142,13 @@ export function PerguntasStatusTab({ groups, fields, checklistId, checklistType 
       return;
     }
 
+    if (checklistType === "inspecao-pre-entrega") {
+      setSqlOutput(buildInspecaoPreEntregaSql(perguntas, checklistId, groups));
+      setShowSql(true);
+      return;
+    }
+
+    // roteiro-entrega-tecnica — existing code unchanged below
     const now = new Date();
     const ts =
       now.getFullYear().toString() +
@@ -963,6 +1226,8 @@ export function PerguntasStatusTab({ groups, fields, checklistId, checklistType 
               setDbOutput(
                 checklistType === "revisao-entrega"
                   ? buildRevisaoEntregaDbRows(perguntas, checklistId, groups)
+                  : checklistType === "inspecao-pre-entrega"
+                  ? buildInspecaoPreEntregaDbRows(perguntas, checklistId, groups)
                   : buildDbRows(perguntas, checklistId),
               );
               setShowDb(true);

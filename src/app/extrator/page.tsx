@@ -46,11 +46,11 @@ const CHECKLIST_TYPES: {
     available: true,
   },
   {
-    id: "inspecao-pre-entrega",
+    id: "inspecao-pre-entrega" as ChecklistType,
     name: "Inspeção Pré-Entrega",
     description: "Inspeção técnica completa antes da entrega",
     icon: Search,
-    available: false,
+    available: true,
   },
   {
     id: "roteiro-entrega-tecnica" as ChecklistType,

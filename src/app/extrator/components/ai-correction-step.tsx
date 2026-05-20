@@ -120,7 +120,7 @@ export function AiCorrectionStep({
         const res = await fetch("/api/generate-fields", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text, model, apiKey }),
+          body: JSON.stringify({ text, model, apiKey, checklistType }),
         });
         const data = await res.json();
         if (data.success && Array.isArray(data.fields)) {
@@ -249,10 +249,14 @@ export function AiCorrectionStep({
 
   function parseSectionsFromText(text: string): { id: string; name: string; questions: string[] }[] {
     const isRevisao = checklistType === "revisao-entrega";
+    const isIPE = checklistType === "inspecao-pre-entrega";
 
-    // revisao-entrega: headers are ALL-CAPS lines (no lowercase letters)
-    // roteiro-entrega-tecnica: headers start with a number followed by an uppercase letter
-    const isSectionHeader = isRevisao
+    // IPE: headers match "A - TITLE" pattern (letter + dash)
+    // revisao-entrega: ALL-CAPS lines (no lowercase letters)
+    // roteiro-entrega-tecnica: lines starting with a digit followed by an uppercase letter
+    const isSectionHeader = isIPE
+      ? (line: string) => /^[A-E]\s*-\s+[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ]/i.test(line)
+      : isRevisao
       ? (line: string) => line.length > 2 && !/[a-záéíóúâêîôûãõçàèìòùäëïöü]/.test(line)
       : (line: string) => /^\d+\s+[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇÀÈÌÒÙÄËÏÖÜ]/.test(line);
 
@@ -264,7 +268,9 @@ export function AiCorrectionStep({
       if (!line || line.startsWith("---")) continue;
       if (isSectionHeader(line)) {
         if (current) sections.push(current);
-        const name = isRevisao
+        const name = isIPE
+          ? line.trim().toUpperCase()
+          : isRevisao
           ? line.trim()
           : line.replace(/^\d+\s+/, "").replace(/\s+STATUS\s*$/i, "").trim();
         current = { id: `sec-${sections.length}`, name, questions: [] };
@@ -393,7 +399,7 @@ export function AiCorrectionStep({
       .map((f) => `            $table->integer('${f.campo}')->nullable();`)
       .join("\n");
     const extraCols =
-      checklistType === "revisao-entrega"
+      checklistType === "revisao-entrega" || checklistType === "inspecao-pre-entrega"
         ? "\n            $table->json('observacoes')->nullable();"
         : "";
     return `<?php
