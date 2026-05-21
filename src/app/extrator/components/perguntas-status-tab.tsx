@@ -26,6 +26,8 @@ interface Props {
   fields: MigrationField[];
   checklistId: string;
   checklistType: ChecklistType;
+  initialPerguntas?: PerguntaAssociada[];
+  onPerguntasChange?: (data: { perguntas: PerguntaAssociada[]; sqlOutput: string; dbOutput: string }) => void;
 }
 
 const TIPOS = [
@@ -987,14 +989,24 @@ function GroupSection({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function PerguntasStatusTab({ groups, fields, checklistId, checklistType }: Props) {
-  const [perguntas, setPerguntas] = useState<PerguntaAssociada[]>([]);
-  const [initialized, setInitialized] = useState(false);
+export function PerguntasStatusTab({ groups, fields, checklistId, checklistType, initialPerguntas, onPerguntasChange }: Props) {
+  const [perguntas, setPerguntas] = useState<PerguntaAssociada[]>(
+    initialPerguntas && initialPerguntas.length > 0 ? initialPerguntas : []
+  );
+  const [initialized, setInitialized] = useState(
+    !!(initialPerguntas && initialPerguntas.length > 0)
+  );
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [showDb, setShowDb] = useState(false);
   const [dbOutput, setDbOutput] = useState("");
   const [showSql, setShowSql] = useState(false);
   const [sqlOutput, setSqlOutput] = useState("");
+
+  useEffect(() => {
+    if (!initialized) return;
+    onPerguntasChange?.({ perguntas, sqlOutput, dbOutput });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perguntas, sqlOutput, dbOutput, initialized]);
 
   useEffect(() => {
     if (groups.length === 0 || fields.length === 0) return;

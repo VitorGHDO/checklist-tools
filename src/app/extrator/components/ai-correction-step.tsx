@@ -19,7 +19,8 @@ import {
   Database,
 } from "lucide-react";
 import { showToast } from "@/components/ui/toast";
-import { AI_MODELS, type UploadedImage, type ChecklistType } from "@/lib/types";
+import { AI_MODELS, type UploadedImage, type ChecklistType, type DraftDados, type PerguntaAssociada } from "@/lib/types";
+import { getApiKey as getProviderApiKey } from "@/lib/api-keys";
 import type { MigrationField } from "@/app/api/generate-fields/route";
 import Image from "next/image";
 import { PerguntasStatusTab } from "./perguntas-status-tab";
@@ -40,6 +41,8 @@ interface Props {
   project: Project;
   checklistType: ChecklistType | null;
   onOpenApiKeyModal: () => void;
+  initialData?: DraftDados;
+  onDataChange?: (data: Partial<DraftDados>) => void;
 }
 
 type ProcessingStep = "extracting" | "correcting" | null;
@@ -51,41 +54,48 @@ export function AiCorrectionStep({
   project,
   checklistType,
   onOpenApiKeyModal,
+  initialData,
+  onDataChange,
 }: Props) {
   const [model, setModel] = useState("gemini-2.5-flash");
   const [instructions, setInstructions] = useState("");
-  const [correctedText, setCorrectedText] = useState("");
-  const [extractedText, setExtractedText] = useState("");
+  const [correctedText, setCorrectedText] = useState(initialData?.texto_corrigido ?? "");
+  const [extractedText, setExtractedText] = useState(initialData?.texto_extraido ?? "");
   const [extractedPages, setExtractedPages] = useState<string[]>([]);
   const [processingStep, setProcessingStep] = useState<ProcessingStep>(null);
   const [showDiff, setShowDiff] = useState(false);
-  const [migrationFields, setMigrationFields] = useState<MigrationField[]>([]);
+  const [migrationFields, setMigrationFields] = useState<MigrationField[]>(
+    initialData?.campos_gerados ?? []
+  );
   const [activeTab, setActiveTab] = useState<ResultTab>("corrected");
-  const [migrationTableName, setMigrationTableName] = useState("tabela_generica");
-  const [workingGroups, setWorkingGroups] = useState<WorkingGroup[]>([]);
+  const [migrationTableName, setMigrationTableName] = useState(
+    initialData?.migration_table_name ?? "tabela_generica"
+  );
+  const [workingGroups, setWorkingGroups] = useState<WorkingGroup[]>(
+    initialData?.working_groups ?? []
+  );
   const [maxQPerSection, setMaxQPerSection] = useState<number>(0);
-  const [checklistId, setChecklistId] = useState("217");
+  const [checklistId, setChecklistId] = useState(initialData?.checklist_id ?? "217");
   const [isGeneratingFields, setIsGeneratingFields] = useState(false);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editingName, setEditingName] = useState("");
   const [showStatusDb, setShowStatusDb] = useState(false);
-  const [statusDbOutput, setStatusDbOutput] = useState("");
+  const [statusDbOutput, setStatusDbOutput] = useState(initialData?.status_db ?? "");
   const [showStatusSql, setShowStatusSql] = useState(false);
-  const [statusSqlOutput, setStatusSqlOutput] = useState("");
+  const [statusSqlOutput, setStatusSqlOutput] = useState(initialData?.status_sql ?? "");
+
+  const skipWorkingGroupsParseRef = useRef(
+    !!(initialData?.working_groups && initialData.working_groups.length > 0)
+  );
 
   const containerRef = useRef<HTMLDivElement>(null);
   const isProcessing = processingStep !== null || isGeneratingFields;
 
   const getApiKey = useCallback((): string | null => {
     if (typeof window === "undefined") return null;
-    const stored = localStorage.getItem("checklist_tools_api_key");
-    if (!stored) return null;
-    try {
-      return atob(stored);
-    } catch {
-      return null;
-    }
-  }, []);
+    const provider = AI_MODELS.find((m) => m.id === model)?.provider ?? "gemini";
+    return getProviderApiKey(provider);
+  }, [model]);
 
   const extractPdf = useCallback(async (): Promise<{ text: string; pages: string[] } | null> => {
     if (!pdfFile) return null;
@@ -377,6 +387,10 @@ export function AiCorrectionStep({
   }
 
   useEffect(() => {
+    if (skipWorkingGroupsParseRef.current) {
+      skipWorkingGroupsParseRef.current = false;
+      return;
+    }
     if (!correctedText) { setWorkingGroups([]); return; }
     const secs = parseSectionsFromText(correctedText);
     setWorkingGroups(secs.map((s) => ({ id: s.id, baseLabel: s.name, questions: s.questions })));
@@ -392,6 +406,35 @@ export function AiCorrectionStep({
     else document.title = "Checklist Tools";
     return () => { document.title = "Checklist Tools"; };
   }, [processingStep, isGeneratingFields, correctedText]);
+
+  useEffect(() => {
+    onDataChange?.({
+      texto_extraido: extractedText,
+      texto_corrigido: correctedText,
+      campos_gerados: migrationFields,
+      working_groups: workingGroups,
+      migration_table_name: migrationTableName,
+      checklist_id: checklistId,
+      status_sql: statusSqlOutput,
+      status_db: statusDbOutput,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extractedText, correctedText, migrationFields, workingGroups, migrationTableName, checklistId, statusSqlOutput, statusDbOutput]);
+
+  const handlePerguntasChange = useCallback(
+    (perguntasData: {
+      perguntas: PerguntaAssociada[];
+      sqlOutput: string;
+      dbOutput: string;
+    }) => {
+      onDataChange?.({
+        perguntas: perguntasData.perguntas,
+        perguntas_sql: perguntasData.sqlOutput,
+        perguntas_db: perguntasData.dbOutput,
+      });
+    },
+    [onDataChange]
+  );
 
   function buildMigrationCode(tableName: string, fields: MigrationField[]): string {
     const safeTable = tableName.trim() || "tabela_generica";
@@ -538,6 +581,7 @@ ${cols}${extraCols}
 
   const geminiModels = AI_MODELS.filter((m) => m.provider === "gemini");
   const openaiModels = AI_MODELS.filter((m) => m.provider === "openai");
+  const anthropicModels = AI_MODELS.filter((m) => m.provider === "anthropic");
   const canRun = !!pdfFile && images.length > 0 && !isProcessing;
   const hasPages = extractedPages.length > 1;
 
@@ -563,6 +607,13 @@ ${cols}${extraCols}
             </optgroup>
             <optgroup label="OpenAI (pago)">
               {openaiModels.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Anthropic Claude (pago)">
+              {anthropicModels.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name}
                 </option>
@@ -1306,6 +1357,8 @@ ${cols}${extraCols}
               fields={migrationFields}
               checklistId={checklistId}
               checklistType={checklistType ?? "roteiro-entrega-tecnica"}
+              initialPerguntas={initialData?.perguntas}
+              onPerguntasChange={handlePerguntasChange}
             />
           )}
         </div>

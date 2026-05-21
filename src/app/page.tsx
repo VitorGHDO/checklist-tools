@@ -16,7 +16,11 @@ export default function Home() {
             </div>
             <h1 className="text-lg font-bold text-[#173872]">Checklist Tools</h1>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-6">
+            <Link href="/historico" className="text-sm text-[#80808F] hover:text-[#173872] transition-colors">
+              Histórico
+            </Link>
+            <div className="flex items-center gap-2">
             <Image
               src="/airton-light-head-aurora.png"
               alt="Airton"
@@ -27,6 +31,7 @@ export default function Home() {
             <span className="text-xs text-[#80808F] bg-[#F9F9F9] px-2.5 py-1 rounded-full border border-[#e8e8e8]">
               Airton — Camp Tecnologia
             </span>
+            </div>
           </div>
         </div>
       </header>

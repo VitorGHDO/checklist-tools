@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import type { CorrectionOptions, AIProvider } from "@/lib/types";
 
 const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"];
 const OPENAI_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"];
+const ANTHROPIC_MODELS = ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"];
 
 const RETRYABLE_CODES = [503, 529];
 const MAX_RETRIES = 3;
@@ -33,6 +35,7 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
 function detectProvider(model: string): AIProvider {
   if (GEMINI_MODELS.includes(model)) return "gemini";
   if (OPENAI_MODELS.includes(model)) return "openai";
+  if (ANTHROPIC_MODELS.includes(model)) return "anthropic";
   return "gemini";
 }
 
@@ -270,6 +273,42 @@ async function callOpenAI(
   return response.choices[0]?.message?.content ?? "";
 }
 
+async function callClaude(
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  userPrompt: string,
+  images: { mimeType: string; base64: string }[]
+) {
+  const anthropic = new Anthropic({ apiKey });
+
+  const contentParts: Anthropic.MessageParam["content"] = [
+    { type: "text", text: userPrompt },
+  ];
+
+  for (const img of images) {
+    contentParts.push({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: img.mimeType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+        data: img.base64,
+      },
+    });
+  }
+
+  const response = await anthropic.messages.create({
+    model,
+    max_tokens: 16000,
+    temperature: 0.1,
+    system: systemPrompt,
+    messages: [{ role: "user", content: contentParts }],
+  });
+
+  const block = response.content[0];
+  return block.type === "text" ? block.text : "";
+}
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -309,6 +348,15 @@ export async function POST(request: NextRequest) {
         {
           success: false,
           error: "Formato de API Key OpenAI inválido (deve começar com sk-)",
+        },
+        { status: 400 }
+      );
+    }
+    if (provider === "anthropic" && !apiKey.startsWith("sk-ant-")) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Formato de API Key Anthropic inválido (deve começar com sk-ant-)",
         },
         { status: 400 }
       );
@@ -357,6 +405,10 @@ export async function POST(request: NextRequest) {
     if (provider === "gemini") {
       correctedText = await withRetry(() =>
         callGemini(apiKey, model, systemPrompt, userPrompt, images)
+      );
+    } else if (provider === "anthropic") {
+      correctedText = await withRetry(() =>
+        callClaude(apiKey, model, systemPrompt, userPrompt, images)
       );
     } else {
       correctedText = await withRetry(() =>

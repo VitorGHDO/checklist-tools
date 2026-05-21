@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import type { AIProvider } from "@/lib/types";
 
 const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"];
 const OPENAI_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"];
+const ANTHROPIC_MODELS = ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"];
 
 const RETRYABLE_CODES = [503, 529];
 const MAX_RETRIES = 3;
@@ -38,6 +40,7 @@ export interface MigrationField {
 function detectProvider(model: string): AIProvider {
   if (GEMINI_MODELS.includes(model)) return "gemini";
   if (OPENAI_MODELS.includes(model)) return "openai";
+  if (ANTHROPIC_MODELS.includes(model)) return "anthropic";
   return "gemini";
 }
 
@@ -132,6 +135,31 @@ async function callOpenAI(
   return response.choices[0]?.message?.content ?? "{\"fields\": []}";
 }
 
+async function callClaude(
+  apiKey: string,
+  model: string,
+  text: string,
+  checklistType?: string,
+): Promise<string> {
+  const anthropic = new Anthropic({ apiKey });
+
+  const response = await anthropic.messages.create({
+    model,
+    max_tokens: 8000,
+    temperature: 0.1,
+    system: buildSystemPrompt(checklistType),
+    messages: [
+      {
+        role: "user",
+        content: `Texto do checklist corrigido:\n\n${text}\n\nRetorne o JSON agora:`,
+      },
+    ],
+  });
+
+  const block = response.content[0];
+  return block.type === "text" ? block.text : "";
+}
+
 function parseFields(raw: string): MigrationField[] {
   // Remove markdown code fences if present
   const cleaned = raw
@@ -204,10 +232,21 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    if (provider === "anthropic" && !apiKey.startsWith("sk-ant-")) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Formato de API Key Anthropic inválido (deve começar com sk-ant-)",
+        },
+        { status: 400 }
+      );
+    }
 
     let raw: string;
     if (provider === "gemini") {
       raw = await withRetry(() => callGemini(apiKey, model, text, checklistType));
+    } else if (provider === "anthropic") {
+      raw = await withRetry(() => callClaude(apiKey, model, text, checklistType));
     } else {
       raw = await withRetry(() => callOpenAI(apiKey, model, text, checklistType));
     }

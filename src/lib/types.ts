@@ -11,7 +11,7 @@ export interface ExtractResult {
 
 // ==================== AI Correction ====================
 
-export type AIProvider = "gemini" | "openai";
+export type AIProvider = "gemini" | "openai" | "anthropic";
 
 export interface AIModel {
   id: string;
@@ -26,6 +26,8 @@ export const AI_MODELS: AIModel[] = [
   { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", provider: "gemini", free: true },
   { id: "gpt-4o", name: "GPT-4o", provider: "openai", free: false },
   { id: "gpt-4o-mini", name: "GPT-4o Mini", provider: "openai", free: false },
+  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (recomendado)", provider: "anthropic", free: false },
+  { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5 (rápido)", provider: "anthropic", free: false },
 ];
 
 export interface CorrectionOptions {
@@ -128,3 +130,45 @@ export interface PageData {
   elements: DesignerElement[];
   backgroundImage?: string;
 }
+
+// ─── Draft / localStorage ──────────────────────────────────────────────────
+
+export interface MigrationField {
+  campo: string;
+  pergunta: string;
+}
+
+export interface WorkingGroup {
+  id: string;
+  baseLabel: string;
+  questions: string[];
+}
+
+export interface DraftDados {
+  texto_extraido: string;
+  texto_corrigido: string;
+  campos_gerados: MigrationField[];
+  working_groups: WorkingGroup[];
+  migration_table_name: string;
+  checklist_id: string;
+  status_sql: string;
+  status_db: string;
+  perguntas: PerguntaAssociada[];
+  perguntas_sql: string;
+  perguntas_db: string;
+  sql_gerado: string;
+}
+
+export interface ChecklistDraft {
+  id: string;
+  nome: string;
+  descricao: string;
+  tipo: ChecklistType | null;
+  etapa_atual: number; // 1=projeto, 2=tipo, 3=upload, 4=IA
+  criado_em: string;   // ISO string
+  atualizado_em: string;
+  finalizado: boolean;
+  dados: DraftDados;
+}
+
+export type DraftsIndex = string[]; // lista de IDs

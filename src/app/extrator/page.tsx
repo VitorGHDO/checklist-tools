@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   FileText,
   Sparkles,
@@ -20,7 +20,9 @@ import { FilesUploadStep } from "./components/files-upload-step";
 import { AiCorrectionStep } from "./components/ai-correction-step";
 import { ApiKeyModal } from "./components/api-key-modal";
 import { ToastContainer } from "@/components/ui/toast";
-import type { UploadedImage, ChecklistType } from "@/lib/types";
+import { ChecklistNameStep } from "./components/checklist-name-step";
+import { useDraftStorage, createEmptyDados } from "@/hooks/useDraftStorage";
+import type { UploadedImage, ChecklistType, ChecklistDraft, DraftDados } from "@/lib/types";
 
 type Project = "entrega-impecavel" | "pos-venda";
 
@@ -85,6 +87,15 @@ export default function ExtratorPage() {
   const [images, setImages] = useState<UploadedImage[]>([]);
   const [showApiModal, setShowApiModal] = useState(false);
 
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [showNameStep, setShowNameStep] = useState(true);
+  const [inProgressDraft, setInProgressDraft] = useState<ChecklistDraft | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"saved" | "idle">("idle");
+  const [quotaError, setQuotaError] = useState(false);
+  const [currentDraftData, setCurrentDraftData] = useState<DraftDados>(createEmptyDados());
+  const [showReuploadWarning, setShowReuploadWarning] = useState(false);
+  const { createDraft, updateDraft, getDraft, getInProgressDrafts } = useDraftStorage();
+
   const handleSelectProject = useCallback((project: Project) => {
     setSelectedProject(project);
     setChecklistType(null);
@@ -92,10 +103,168 @@ export default function ExtratorPage() {
     setImages([]);
   }, []);
 
+  const handleIniciar = useCallback(
+    (nome: string, descricao: string) => {
+      const draft = createDraft(nome, descricao, null);
+      setDraftId(draft.id);
+      setShowNameStep(false);
+      setInProgressDraft(null);
+    },
+    [createDraft]
+  );
+
+  const handleRetomar = useCallback(
+    (draft: ChecklistDraft) => {
+      setDraftId(draft.id);
+      setInProgressDraft(null);
+      setShowNameStep(false);
+      setCurrentDraftData(draft.dados);
+      if (draft.tipo) {
+        setSelectedProject("entrega-impecavel");
+        setChecklistType(draft.tipo);
+      }
+      if (draft.etapa_atual >= 3 && draft.dados.texto_extraido) {
+        setShowReuploadWarning(true);
+      }
+    },
+    []
+  );
+
+  const handleDataChange = useCallback(
+    (data: Partial<DraftDados>) => {
+      setCurrentDraftData((prev) => ({ ...prev, ...data }));
+    },
+    []
+  );
+
+  useEffect(() => {
+    const resumeId = sessionStorage.getItem("checklist_resume_id");
+    if (resumeId) {
+      sessionStorage.removeItem("checklist_resume_id");
+      const draft = getDraft(resumeId);
+      if (draft) {
+        handleRetomar(draft);
+        return;
+      }
+    }
+    const inProgress = getInProgressDrafts();
+    if (inProgress.length > 0) {
+      setInProgressDraft(inProgress[0]);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!draftId) return;
+    const etapaAtual = !selectedProject ? 1 : !checklistType ? 2 : !pdfFile ? 3 : 4;
+    const result = updateDraft(draftId, {
+      tipo: checklistType,
+      etapa_atual: etapaAtual,
+      dados: currentDraftData,
+    });
+    if (!result.ok && result.error === "quota") {
+      setQuotaError(true);
+      return;
+    }
+    setSaveStatus("saved");
+    const timer = setTimeout(() => setSaveStatus("idle"), 2000);
+    return () => clearTimeout(timer);
+  }, [draftId, selectedProject, checklistType, pdfFile, currentDraftData, updateDraft]);
+
   const selectedProjectData = PROJECTS.find((p) => p.id === selectedProject);
+
+  if (showNameStep) {
+    return (
+      <>
+        {inProgressDraft && (
+          <div className="fixed top-0 left-0 right-0 z-50 bg-white border-b border-[#e8e8e8] px-6 py-3 flex items-center gap-3"
+            style={{ boxShadow: "0px 4px 16px 0px rgba(76,87,125,0.08)" }}
+          >
+            <span className="w-2 h-2 rounded-full bg-[#FFB822] shrink-0" />
+            <span className="text-sm text-[#464E5F] flex-1 truncate">
+              Rascunho em progresso:{" "}
+              <strong className="text-[#173872]">{inProgressDraft.nome}</strong>
+              <span className="text-[#80808F]"> — Etapa {inProgressDraft.etapa_atual} de 4</span>
+            </span>
+            <button
+              onClick={() => handleRetomar(inProgressDraft)}
+              className="px-3 py-1.5 rounded-lg bg-[#173872] hover:bg-[#122d5e] text-white text-xs font-medium transition-colors shrink-0"
+            >
+              Continuar
+            </button>
+            <a
+              href="/historico"
+              className="px-3 py-1.5 rounded-lg border border-[#e8e8e8] bg-[#F9F9F9] hover:bg-[#efefef] text-[#464E5F] text-xs font-medium transition-colors shrink-0"
+            >
+              Ver histórico
+            </a>
+            <button
+              onClick={() => setInProgressDraft(null)}
+              className="text-[#80808F] hover:text-[#464E5F] text-xs transition-colors shrink-0"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        <div className={inProgressDraft ? "pt-14" : ""}>
+          <ChecklistNameStep onIniciar={handleIniciar} />
+        </div>
+      </>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#e6e6e6] text-[#464E5F]">
+      {/* "Salvo" indicator */}
+      {draftId && saveStatus === "saved" && (
+        <div className="fixed bottom-4 right-4 z-50 bg-white text-[#0BB783] text-xs px-3 py-1.5 rounded-full border border-[#0BB783]/30 pointer-events-none select-none"
+          style={{ boxShadow: "0px 4px 12px 0px rgba(76,87,125,0.10)" }}
+        >
+          ✓ Salvo
+        </div>
+      )}
+      {/* Quota error alert */}
+      {quotaError && (
+        <div className="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:w-96 z-50 bg-white border border-[#ED3237]/30 text-[#464E5F] text-sm px-4 py-3 rounded-xl flex items-start gap-3"
+          style={{ boxShadow: "0px 8px 24px 0px rgba(76,87,125,0.12)" }}
+        >
+          <span className="text-[#ED3237] font-bold shrink-0 mt-0.5">!</span>
+          <span className="flex-1">
+            <strong className="text-[#ED3237]">Limite de armazenamento atingido.</strong>
+            {" "}Acesse o{" "}
+            <a href="/historico" className="underline text-[#173872] hover:text-[#ED3237]">
+              histórico
+            </a>{" "}
+            e apague rascunhos antigos para liberar espaço.
+          </span>
+          <button
+            onClick={() => setQuotaError(false)}
+            className="text-[#80808F] hover:text-[#464E5F] shrink-0 transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+      {/* Re-upload warning */}
+      {showReuploadWarning && (
+        <div className="fixed top-[72px] left-0 right-0 flex justify-center z-50 pointer-events-none px-4">
+          <div className="bg-white border border-[#FFB822]/40 text-[#464E5F] text-sm px-5 py-3 rounded-xl pointer-events-auto max-w-md flex items-center gap-3"
+            style={{ boxShadow: "0px 8px 24px 0px rgba(76,87,125,0.12)" }}
+          >
+            <span className="text-[#FFB822] font-bold shrink-0">⚠</span>
+            <span className="flex-1">
+              Esta etapa requer o <strong>upload do PDF</strong> novamente. Os dados anteriores foram restaurados.
+            </span>
+            <button
+              onClick={() => setShowReuploadWarning(false)}
+              className="text-[#80808F] hover:text-[#464E5F] shrink-0 transition-colors ml-1"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header
         className="sticky top-0 z-40 bg-white border-b border-[#e8e8e8]"
@@ -325,6 +494,8 @@ export default function ExtratorPage() {
                   project="entrega-impecavel"
                   checklistType={checklistType}
                   onOpenApiKeyModal={() => setShowApiModal(true)}
+                  initialData={currentDraftData}
+                  onDataChange={handleDataChange}
                 />
               </div>
             </section>
