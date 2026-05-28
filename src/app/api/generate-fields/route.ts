@@ -103,10 +103,16 @@ async function callGemini(
   checklistType?: string,
 ): Promise<string> {
   const genAI = new GoogleGenerativeAI(apiKey);
-  const genModel = genAI.getGenerativeModel({ model });
+  const genModel = genAI.getGenerativeModel(
+    { model },
+    { apiVersion: "v1beta" }
+  );
 
   const prompt = `${buildSystemPrompt(checklistType)}\n\nTexto do checklist corrigido:\n\n${text}\n\nRetorne o JSON agora:`;
-  const result = await genModel.generateContent(prompt);
+  const result = await genModel.generateContent({
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig: { maxOutputTokens: 32768 },
+  });
   return result.response.text();
 }
 
@@ -145,7 +151,7 @@ async function callClaude(
 
   const response = await anthropic.messages.create({
     model,
-    max_tokens: 8000,
+    max_tokens: 16000,
     temperature: 0.1,
     system: buildSystemPrompt(checklistType),
     messages: [
@@ -160,6 +166,16 @@ async function callClaude(
   return block.type === "text" ? block.text : "";
 }
 
+function repairTruncatedJson(raw: string): string {
+  // Find the last complete object and close the array after it
+  const lastBrace = raw.lastIndexOf("}");
+  if (lastBrace === -1) return "[]";
+  const partial = raw.slice(0, lastBrace + 1);
+  const arrayStart = partial.indexOf("[");
+  if (arrayStart === -1) return "[]";
+  return partial.slice(arrayStart) + "]";
+}
+
 function parseFields(raw: string): MigrationField[] {
   // Remove markdown code fences if present
   const cleaned = raw
@@ -167,7 +183,15 @@ function parseFields(raw: string): MigrationField[] {
     .replace(/\s*```$/i, "")
     .trim();
 
-  const parsed = JSON.parse(cleaned);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    // Attempt recovery for truncated responses
+    const repaired = repairTruncatedJson(cleaned);
+    console.warn("JSON truncado — recuperação parcial aplicada");
+    parsed = JSON.parse(repaired);
+  }
 
   // Handle both array and {fields: [...]} shapes
   let arr: unknown[];
