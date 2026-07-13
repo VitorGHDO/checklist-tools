@@ -136,6 +136,7 @@ export interface PageData {
 export interface MigrationField {
   campo: string;
   pergunta: string;
+  secao?: string;
 }
 
 export interface WorkingGroup {

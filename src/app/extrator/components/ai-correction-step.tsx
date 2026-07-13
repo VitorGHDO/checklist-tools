@@ -135,7 +135,14 @@ export function AiCorrectionStep({
         const data = await res.json();
         if (data.success && Array.isArray(data.fields)) {
           setMigrationFields(data.fields);
-          showToast(`Airton gerou ${data.fields.length} campos!`, "success");
+          if (data.truncated) {
+            showToast(
+              `Resposta truncada: ${data.fields.length} campos gerados, mas alguns itens podem ter ficado de fora. Gere novamente ou divida o checklist.`,
+              "error",
+            );
+          } else {
+            showToast(`Airton gerou ${data.fields.length} campos!`, "success");
+          }
         } else {
           console.error("[generate-fields] Erro da API:", data.error);
           showToast("Erro ao gerar campos: " + data.error, "error");

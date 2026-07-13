@@ -39,6 +39,66 @@ function detectProvider(model: string): AIProvider {
   return "gemini";
 }
 
+const PROVIDER_LABELS: Record<AIProvider, string> = {
+  gemini: "Google Gemini",
+  openai: "OpenAI",
+  anthropic: "Anthropic (Claude)",
+};
+
+/** Extrai o status HTTP de um erro dos SDKs (OpenAI/Anthropic/Gemini expõem `.status`). */
+function getErrorStatus(error: unknown): number | undefined {
+  if (typeof error === "object" && error !== null && "status" in error) {
+    const status = (error as { status?: unknown }).status;
+    if (typeof status === "number") return status;
+  }
+  return undefined;
+}
+
+/**
+ * Converte erros crípticos dos provedores em mensagens claras.
+ * Ex.: a Anthropic, ao rejeitar a chave durante um upload grande de imagem,
+ * fecha a conexão e o SDK reporta apenas "401 terminated" — aqui traduzimos
+ * isso para uma mensagem acionável, preservando o status HTTP real.
+ */
+function friendlyErrorMessage(
+  error: unknown,
+  provider: AIProvider | undefined
+): { message: string; status: number } {
+  const rawMessage = error instanceof Error ? error.message : "Erro desconhecido";
+  const label = provider ? PROVIDER_LABELS[provider] : "IA";
+  const status = getErrorStatus(error);
+
+  // O SDK do Gemini retorna 400 com "API key not valid" para chave inválida.
+  const isGeminiBadKey =
+    status === 400 && /api key not valid|API_KEY_INVALID/i.test(rawMessage);
+
+  if (status === 401 || isGeminiBadKey) {
+    return {
+      message: `Chave de API da ${label} inválida, expirada ou sem créditos/billing habilitado. Verifique a chave configurada e tente novamente.`,
+      status: 401,
+    };
+  }
+  if (status === 403) {
+    return {
+      message: `Acesso negado pela ${label} (403). A chave pode não ter permissão para este modelo, ou a conta/região não é suportada.`,
+      status: 403,
+    };
+  }
+  if (status === 429) {
+    return {
+      message: `Limite de requisições/cota excedido na ${label} (429). Aguarde alguns instantes ou verifique sua cota/billing.`,
+      status: 429,
+    };
+  }
+  if (status === 404) {
+    return {
+      message: `Modelo não encontrado na ${label} (404). Verifique se o modelo selecionado está disponível para sua conta.`,
+      status: 404,
+    };
+  }
+  return { message: rawMessage, status: 500 };
+}
+
 function buildSystemPrompt(options: CorrectionOptions, project?: string, checklistType?: string): string {
   if (checklistType === "inspecao-pre-entrega") {
     return (
@@ -310,6 +370,7 @@ async function callClaude(
 }
 
 export async function POST(request: NextRequest) {
+  let provider: AIProvider | undefined;
   try {
     const formData = await request.formData();
 
@@ -341,7 +402,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const provider = detectProvider(model);
+    provider = detectProvider(model);
 
     if (provider === "openai" && !apiKey.startsWith("sk-")) {
       return NextResponse.json(
@@ -430,11 +491,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("Erro na correção com IA:", error);
-    const message =
-      error instanceof Error ? error.message : "Erro desconhecido";
-    return NextResponse.json(
-      { success: false, error: message },
-      { status: 500 }
-    );
+    const { message, status } = friendlyErrorMessage(error, provider);
+    return NextResponse.json({ success: false, error: message }, { status });
   }
 }

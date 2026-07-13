@@ -35,6 +35,7 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
 export interface MigrationField {
   campo: string;
   pergunta: string;
+  secao?: string;
 }
 
 function detectProvider(model: string): AIProvider {
@@ -60,10 +61,15 @@ REGRAS OBRIGATÓRIAS para o nome do campo (coluna "campo"):
   "Convidar o cliente para retirar a capa de proteção..." → "retirar_capa"
   "Explicar o funcionamento do botão de travamento à distância..." → "botao_travamento_distancia"
 
-O QUE IGNORAR:
+O QUE IGNORAR (não gerar campo para):
 - Linhas que são títulos de seção (ex: "1 INFORMAÇÃO TÉCNICA | DOCUMENTOS E MANUAIS STATUS")
 - Linhas vazias
-- Separadores como "--- Página ---"`;
+- Separadores como "--- Página ---"
+
+ESTRUTURA DE SAÍDA (AGRUPAR POR SEÇÃO):
+- Agrupe os itens por seção. Para CADA seção, crie um objeto com "secao" (o TÍTULO da seção, copiado EXATAMENTE como aparece no cabeçalho, sem inventar nem resumir) e "itens" (a lista de campos daquela seção).
+- O título da seção aparece UMA ÚNICA VEZ por seção — NÃO repita em cada item.
+- Mantenha as seções e os itens na MESMA ORDEM em que aparecem no texto.`;
 
 const IPE_EXTRA_RULES = `
 - O texto contém seções identificadas por letras (A, B, C, D, E) no formato "X - TÍTULO DA SEÇÃO"
@@ -79,7 +85,9 @@ function buildSystemPrompt(checklistType?: string): string {
 FORMATO DE SAÍDA:
 Retorne APENAS um JSON válido (array), sem explicações, sem markdown, sem código de bloco:
 [
-  {"campo": "nome_do_campo", "pergunta": "Texto completo do item de checklist"},
+  {"secao": "Título exato da seção", "itens": [
+    {"campo": "nome_do_campo", "pergunta": "Texto completo do item de checklist"}
+  ]},
   ...
 ]`;
 }
@@ -89,9 +97,11 @@ function buildOpenAISystemPrompt(checklistType?: string): string {
   return BASE_PROMPT_BODY + extra + `
 
 FORMATO DE SAÍDA OBRIGATÓRIO:
-Retorne APENAS um objeto JSON no formato {"fields": [...]}, sem explicações ou markdown:
-{"fields": [
-  {"campo": "nome_do_campo", "pergunta": "Texto completo do item de checklist"},
+Retorne APENAS um objeto JSON no formato {"secoes": [...]}, sem explicações ou markdown:
+{"secoes": [
+  {"secao": "Título exato da seção", "itens": [
+    {"campo": "nome_do_campo", "pergunta": "Texto completo do item de checklist"}
+  ]},
   ...
 ]}`;
 }
@@ -111,7 +121,7 @@ async function callGemini(
   const prompt = `${buildSystemPrompt(checklistType)}\n\nTexto do checklist corrigido:\n\n${text}\n\nRetorne o JSON agora:`;
   const result = await genModel.generateContent({
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: { maxOutputTokens: 32768 },
+    generationConfig: { maxOutputTokens: 65536 },
   });
   return result.response.text();
 }
@@ -149,9 +159,11 @@ async function callClaude(
 ): Promise<string> {
   const anthropic = new Anthropic({ apiKey });
 
-  const response = await anthropic.messages.create({
+  // Streaming é obrigatório quando max_tokens é alto o bastante para a requisição
+  // poder passar de 10 min sem stream. Acumulamos e devolvemos o texto completo.
+  const stream = anthropic.messages.stream({
     model,
-    max_tokens: 16000,
+    max_tokens: 32000,
     temperature: 0.1,
     system: buildSystemPrompt(checklistType),
     messages: [
@@ -162,21 +174,62 @@ async function callClaude(
     ],
   });
 
-  const block = response.content[0];
-  return block.type === "text" ? block.text : "";
+  return await stream.finalText();
 }
 
 function repairTruncatedJson(raw: string): string {
-  // Find the last complete object and close the array after it
+  // Mantém até o último objeto completo e fecha, na ordem correta, todos os
+  // colchetes/chaves ainda abertos (funciona com estrutura agrupada aninhada).
   const lastBrace = raw.lastIndexOf("}");
   if (lastBrace === -1) return "[]";
   const partial = raw.slice(0, lastBrace + 1);
-  const arrayStart = partial.indexOf("[");
-  if (arrayStart === -1) return "[]";
-  return partial.slice(arrayStart) + "]";
+  const stack: string[] = [];
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < partial.length; i++) {
+    const c = partial[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === "[" || c === "{") stack.push(c);
+    else if (c === "]" || c === "}") stack.pop();
+  }
+  let out = partial;
+  for (let i = stack.length - 1; i >= 0; i--) out += stack[i] === "[" ? "]" : "}";
+  return out;
 }
 
-function parseFields(raw: string): MigrationField[] {
+// Achata a resposta (agrupada por seção, plana, ou com wrapper) em MigrationField[],
+// herdando o "secao" do grupo quando o item não o traz.
+function flattenToFields(node: unknown, inheritedSecao: string, out: MigrationField[]): void {
+  if (Array.isArray(node)) {
+    for (const el of node) flattenToFields(el, inheritedSecao, out);
+    return;
+  }
+  if (!node || typeof node !== "object") return;
+  const obj = node as Record<string, unknown>;
+  const isItem = typeof obj.campo === "string" && typeof obj.pergunta === "string";
+  if (isItem) {
+    const secao = typeof obj.secao === "string" ? obj.secao : inheritedSecao;
+    out.push({
+      campo: (obj.campo as string).trim(),
+      pergunta: (obj.pergunta as string).trim(),
+      secao: secao.trim(),
+    });
+    return;
+  }
+  // Grupo/wrapper: adota o "secao" deste nível e desce nos filhos array/objeto.
+  const secao = typeof obj.secao === "string" ? obj.secao : inheritedSecao;
+  for (const v of Object.values(obj)) {
+    if (v && typeof v === "object") flattenToFields(v, secao, out);
+  }
+}
+
+function parseFields(raw: string): { fields: MigrationField[]; truncated: boolean } {
   // Remove markdown code fences if present
   const cleaned = raw
     .replace(/^```(?:json)?\s*/i, "")
@@ -184,41 +237,23 @@ function parseFields(raw: string): MigrationField[] {
     .trim();
 
   let parsed: unknown;
+  let truncated = false;
   try {
     parsed = JSON.parse(cleaned);
   } catch {
-    // Attempt recovery for truncated responses
-    const repaired = repairTruncatedJson(cleaned);
+    // Recuperação para respostas truncadas
+    truncated = true;
     console.warn("JSON truncado — recuperação parcial aplicada");
-    parsed = JSON.parse(repaired);
+    try {
+      parsed = JSON.parse(repairTruncatedJson(cleaned));
+    } catch {
+      parsed = [];
+    }
   }
 
-  // Handle both array and {fields: [...]} shapes
-  let arr: unknown[];
-  if (Array.isArray(parsed)) {
-    arr = parsed;
-  } else if (typeof parsed === "object" && parsed !== null) {
-    // Handles qualquer chave wrapper: {"fields": []}, {"items": []}, {"data": []}, etc.
-    const firstArray = Object.values(parsed as Record<string, unknown>).find(
-      (v) => Array.isArray(v)
-    );
-    arr = (firstArray as unknown[]) ?? [];
-  } else {
-    arr = [];
-  }
-
-  return arr
-    .filter(
-      (item): item is MigrationField =>
-        typeof item === "object" &&
-        item !== null &&
-        typeof (item as MigrationField).campo === "string" &&
-        typeof (item as MigrationField).pergunta === "string"
-    )
-    .map((item) => ({
-      campo: item.campo.trim(),
-      pergunta: item.pergunta.trim(),
-    }));
+  const fields: MigrationField[] = [];
+  flattenToFields(parsed, "", fields);
+  return { fields, truncated };
 }
 
 export async function POST(request: NextRequest) {
@@ -275,9 +310,9 @@ export async function POST(request: NextRequest) {
       raw = await withRetry(() => callOpenAI(apiKey, model, text, checklistType));
     }
 
-    const fields = parseFields(raw);
+    const { fields, truncated } = parseFields(raw);
 
-    return NextResponse.json({ success: true, fields, model, provider });
+    return NextResponse.json({ success: true, fields, truncated, model, provider });
   } catch (error) {
     console.error("Erro ao gerar campos de migration:", error);
     const message =

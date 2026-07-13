@@ -191,18 +191,22 @@ function buildAssociation(
   fields: MigrationField[],
   checklistType: ChecklistType = "roteiro-entrega-tecnica",
 ): PerguntaAssociada[] {
-  const result: PerguntaAssociada[] = [];
-  const matchedIdx = new Set<number>();
   const isRevisao = checklistType === "revisao-entrega";
   const isIPE = checklistType === "inspecao-pre-entrega";
 
-  let globalOrdCounter = 0; // used only for IPE — ordem is continuous across all groups
+  const normSection = (s: string) =>
+    (s ?? "")
+      .replace(/^\d+\s+/, "")
+      .replace(/\s+STATUS\s*$/i, "")
+      .trim()
+      .toLowerCase();
+  const normText = (s: string) => s.trim().toLowerCase();
 
-  groups.forEach((group, gIdx) => {
+  // Metadados de cada status (grupo) + índice por nome de seção normalizado.
+  const groupMeta = groups.map((group, gIdx) => {
     let grupo: string;
     let titulo: string;
     let ordemGrupo: number;
-
     if (isIPE) {
       ({ grupo, titulo, ordemGrupo } = buildIPEGroupFields(group, gIdx));
     } else if (isRevisao) {
@@ -214,43 +218,76 @@ function buildAssociation(
       titulo = group.baseLabel;
       ordemGrupo = gIdx + 1;
     }
-
-    group.questions.forEach((question, qIdx) => {
-      let fi = fields.findIndex((f, i) => !matchedIdx.has(i) && f.pergunta === question);
-      if (fi === -1) {
-        const norm = question.trim().toLowerCase();
-        fi = fields.findIndex(
-          (f, i) => !matchedIdx.has(i) && f.pergunta.trim().toLowerCase() === norm,
-        );
-      }
-      const campo = fi >= 0 ? fields[fi].campo : slugify(question);
-      if (fi >= 0) matchedIdx.add(fi);
-
-      let ordem: number;
-      if (isIPE) {
-        globalOrdCounter++;
-        ordem = globalOrdCounter * 10;
-      } else if (isRevisao) {
-        ordem = (qIdx + 1) * 10;
-      } else {
-        ordem = qIdx + 1;
-      }
-
-      result.push(
-        makeDefaults(campo, question, gIdx, ordem, grupo, titulo, ordemGrupo, `g${gIdx}-q${qIdx}`, checklistType),
-      );
-    });
+    return { grupo, titulo, ordemGrupo, key: normSection(group.baseLabel) };
   });
+
+  const idxByName = new Map<string, number>();
+  groupMeta.forEach((m, gIdx) => {
+    if (m.key && !idxByName.has(m.key)) idxByName.set(m.key, gIdx);
+  });
+
+  // Resolve o status de um campo: 1) pela "secao" marcada pela IA (join direto,
+  // robusto); 2) fallback por texto contra as perguntas do grupo (dados antigos
+  // gerados antes do campo "secao"). Retorna -1 se não resolver.
+  const resolveGroupIdx = (field: MigrationField): number => {
+    const secao = normSection(field.secao ?? "");
+    if (secao) {
+      const exact = idxByName.get(secao);
+      if (exact !== undefined) return exact;
+      for (let gi = 0; gi < groupMeta.length; gi++) {
+        const k = groupMeta[gi].key;
+        if (k && (k.includes(secao) || secao.includes(k))) return gi;
+      }
+    }
+    const p = normText(field.pergunta);
+    if (p) {
+      for (let gi = 0; gi < groups.length; gi++) {
+        if (
+          groups[gi].questions.some((q) => {
+            const nq = normText(q);
+            return nq === p || nq.includes(p) || p.includes(nq);
+          })
+        )
+          return gi;
+      }
+    }
+    return -1;
+  };
+
+  // Uma entrada por CAMPO da IA (fonte canônica: nome do campo correto, sem
+  // duplicação). O status vem da seção resolvida acima.
+  const result: PerguntaAssociada[] = [];
+  const unassigned: PerguntaAssociada[] = [];
+  const perGroupCount = new Array(groups.length).fill(0);
+  let globalOrdCounter = 0; // IPE: ordem contínua em ordem de leitura dos campos
 
   fields.forEach((field, i) => {
-    if (!matchedIdx.has(i)) {
-      result.push(
+    const gIdx = resolveGroupIdx(field);
+    if (gIdx < 0) {
+      unassigned.push(
         makeDefaults(field.campo, field.pergunta, -1, 1, "", "", 0, `unmatched-${i}`, checklistType),
       );
+      return;
     }
+    const meta = groupMeta[gIdx];
+    perGroupCount[gIdx] += 1;
+
+    let ordem: number;
+    if (isIPE) {
+      globalOrdCounter++;
+      ordem = globalOrdCounter * 10;
+    } else if (isRevisao) {
+      ordem = perGroupCount[gIdx] * 10;
+    } else {
+      ordem = perGroupCount[gIdx];
+    }
+
+    result.push(
+      makeDefaults(field.campo, field.pergunta, gIdx, ordem, meta.grupo, meta.titulo, meta.ordemGrupo, `f${i}`, checklistType),
+    );
   });
 
-  return result;
+  return [...result, ...unassigned];
 }
 
 function buildDbRows(perguntas: PerguntaAssociada[], checklistId: string): string {
@@ -1017,31 +1054,31 @@ export function PerguntasStatusTab({ groups, fields, checklistId, checklistType,
       return;
     }
 
-    // Sync incremental changes to migrationFields after initialization
+    // Reconcilia para ficar 1:1 com os fields atuais. Cada pergunta corresponde a
+    // um campo (chave estável e única): reaproveita a entrada anterior quando o
+    // `campo` ainda existe (preserva edições manuais) e usa a recém-construída para
+    // campos novos. Entradas sem campo correspondente (ex.: dados antigos com campo
+    // "slugify" do modelo por seção) são descartadas. Idempotente — seguro no
+    // double-run do mount e ao restaurar rascunhos.
     setPerguntas((prev) => {
-      const fieldPerguntas = new Set(fields.map((f) => f.pergunta));
-      const existingPerguntas = new Set(prev.map((p) => p.pergunta));
-
-      // Remove entries whose pergunta text no longer exists in fields
-      let next = prev.filter((p) => fieldPerguntas.has(p.pergunta));
-
-      // Add new fields not yet present in perguntas (as unassigned)
-      fields.forEach((f, i) => {
-        if (!existingPerguntas.has(f.pergunta)) {
-          next = [
-            ...next,
-            makeDefaults(f.campo, f.pergunta, -1, next.length + 1, "", "", 0, `synced-${i}-${Date.now()}`, checklistType),
-          ];
-        }
+      const rebuilt = buildAssociation(groups, fields, checklistType);
+      const prevByCampo = new Map(prev.map((p) => [p.campo, p]));
+      return rebuilt.map((np) => {
+        const old = prevByCampo.get(np.campo);
+        if (!old) return np;
+        // Preserva edições de conteúdo do usuário (tipo, opções, obrigatório,
+        // foto, etc.), mas status/agrupamento/ordem/texto vêm do build novo,
+        // que é autoritativo (evita herdar statusIdx obsoleto de dados antigos).
+        return {
+          ...old,
+          pergunta: np.pergunta,
+          statusIdx: np.statusIdx,
+          ordem: np.ordem,
+          grupo: np.grupo,
+          titulo: np.titulo,
+          ordemGrupo: np.ordemGrupo,
+        };
       });
-
-      // Sync campo name edits (pergunta text is the stable key)
-      next = next.map((p) => {
-        const match = fields.find((f) => f.pergunta === p.pergunta);
-        return match && match.campo !== p.campo ? { ...p, campo: match.campo } : p;
-      });
-
-      return next;
     });
   }, [fields, initialized, groups]);
 
