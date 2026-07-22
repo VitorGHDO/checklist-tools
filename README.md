@@ -1,36 +1,57 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Checklist Tools
 
-## Getting Started
+Ferramentas internas da Camp Tecnologia para transformar checklists automotivos em PDF em código pronto para o banco de dados, usando IA.
 
-First, run the development server:
+O **Extrator** recebe um PDF de checklist, extrai o texto, corrige/organiza com IA (comparando com imagens de referência do documento) e gera:
+
+- os **campos** (colunas `snake_case`) de cada pergunta;
+- a **migration** do Laravel (`Schema::create(...)`);
+- os **INSERTs** de `checklist_status` e `checklist_perguntas` (e o formato "DB" em TSV).
+
+Os rascunhos ficam salvos no navegador e podem ser retomados em **/historico**.
+
+## Stack
+
+- **Next.js 16** (App Router) + **React 19** + **TypeScript**
+- **Tailwind CSS 4**
+- Fonte **Poppins** (via `next/font`)
+- IA: **Anthropic (Claude)**
+- Extração de PDF: **pdf-parse**
+
+## Como rodar
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev        # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Outros comandos:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run build      # build de produção
+npm run start      # roda o build de produção
+npm run lint       # ESLint
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Não há testes configurados.
 
-## Learn More
+## Chaves de API
 
-To learn more about Next.js, take a look at the following resources:
+A chave da Anthropic é configurada na própria interface (botão **API Key**) e fica **somente no navegador** (`localStorage`). Ela é enviada às rotas internas (`/api/*`) apenas no momento da requisição e **nunca é persistida no servidor** — cada pessoa usa a sua própria chave.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- Anthropic / Claude: <https://console.anthropic.com/settings/keys>
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Estrutura
 
-## Deploy on Vercel
+```
+src/
+  app/
+    api/               # rotas: extract-pdf, correct-text, generate-fields
+    extrator/          # fluxo principal (wizard) + componentes de etapa
+    historico/         # rascunhos salvos
+  components/ui/       # primitivos de UI (drop-zone, toast, etc.)
+  hooks/               # useDraftStorage (rascunhos em localStorage)
+  lib/                 # tipos, utilitários e chaves de API
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Persistência é 100% no cliente — o app **não usa banco de dados**.

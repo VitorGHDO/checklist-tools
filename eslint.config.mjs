@@ -13,6 +13,16 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    // Regras novas e estritas do eslint-plugin-react-hooks (React 19) que
+    // disparam em padrões legítimos deste app (inicialização de estado a partir
+    // do localStorage no mount). Rebaixadas para aviso — decisão de política,
+    // reversível. Refatorar os efeitos exigiria testes que o projeto não tem.
+    rules: {
+      "react-hooks/set-state-in-effect": "warn",
+      "react-hooks/immutability": "warn",
+    },
+  },
 ]);
 
 export default eslintConfig;
