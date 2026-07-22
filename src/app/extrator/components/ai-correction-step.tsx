@@ -19,21 +19,12 @@ import {
   Database,
 } from "lucide-react";
 import { showToast } from "@/components/ui/toast";
-import { AI_MODELS, type UploadedImage, type ChecklistType, type DraftDados, type PerguntaAssociada } from "@/lib/types";
+import { AI_MODELS, type UploadedImage, type ChecklistType, type DraftDados, type PerguntaAssociada, type MigrationField, type WorkingGroup, type Project } from "@/lib/types";
 import { getApiKey as getProviderApiKey } from "@/lib/api-keys";
-import type { MigrationField } from "@/app/api/generate-fields/route";
 import Image from "next/image";
 import { PerguntasStatusTab } from "./perguntas-status-tab";
 import { ScrollButtons } from "@/components/ui/scroll-buttons";
 import { AirtonBadge } from "@/components/ui/airton-badge";
-
-interface WorkingGroup {
-  id: string;
-  baseLabel: string;
-  questions: string[];
-}
-
-type Project = "entrega-impecavel" | "pos-venda";
 
 interface Props {
   pdfFile: File | null;
@@ -57,7 +48,7 @@ export function AiCorrectionStep({
   initialData,
   onDataChange,
 }: Props) {
-  const [model, setModel] = useState("gemini-2.5-flash");
+  const [model, setModel] = useState("claude-sonnet-4-6");
   const [instructions, setInstructions] = useState("");
   const [correctedText, setCorrectedText] = useState(initialData?.texto_corrigido ?? "");
   const [extractedText, setExtractedText] = useState(initialData?.texto_extraido ?? "");
@@ -93,9 +84,8 @@ export function AiCorrectionStep({
 
   const getApiKey = useCallback((): string | null => {
     if (typeof window === "undefined") return null;
-    const provider = AI_MODELS.find((m) => m.id === model)?.provider ?? "gemini";
-    return getProviderApiKey(provider);
-  }, [model]);
+    return getProviderApiKey("anthropic");
+  }, []);
 
   const extractPdf = useCallback(async (): Promise<{ text: string; pages: string[] } | null> => {
     if (!pdfFile) return null;
@@ -586,9 +576,6 @@ ${cols}${extraCols}
     return lines.join("\n\n");
   }
 
-  const geminiModels = AI_MODELS.filter((m) => m.provider === "gemini");
-  const openaiModels = AI_MODELS.filter((m) => m.provider === "openai");
-  const anthropicModels = AI_MODELS.filter((m) => m.provider === "anthropic");
   const canRun = !!pdfFile && images.length > 0 && !isProcessing;
   const hasPages = extractedPages.length > 1;
 
@@ -605,27 +592,11 @@ ${cols}${extraCols}
             onChange={(e) => setModel(e.target.value)}
             className="w-full bg-white border border-[#d0d0d0] rounded-lg px-3 py-2 text-sm text-[#464E5F] focus:outline-none focus:ring-2 focus:ring-[#173872]/30 focus:border-[#173872]/50 transition-colors"
           >
-            <optgroup label="Google Gemini (gratuito)">
-              {geminiModels.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="OpenAI (pago)">
-              {openaiModels.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="Anthropic Claude (pago)">
-              {anthropicModels.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </optgroup>
+            {AI_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
           </select>
         </div>
 

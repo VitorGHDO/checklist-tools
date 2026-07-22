@@ -1,32 +1,18 @@
 import type { AIProvider } from "@/lib/types";
 
 const KEY_MAP: Record<AIProvider, string> = {
-  gemini: "checklist_tools_api_key_gemini",
-  openai: "checklist_tools_api_key_openai",
   anthropic: "checklist_tools_api_key_anthropic",
 };
 
 const LEGACY_KEY = "checklist_tools_api_key";
 
-function detectLegacyProvider(key: string): AIProvider {
-  if (key.startsWith("sk-ant-")) return "anthropic";
-  if (key.startsWith("sk-")) return "openai";
-  return "gemini";
-}
-
-/** Migra a chave legada (única) para a chave do provedor correto e remove a antiga. */
+/** Migra a chave legada (única) para a chave da Anthropic e remove a antiga. */
 export function migrateLegacyKey(): void {
   if (typeof window === "undefined") return;
   const stored = localStorage.getItem(LEGACY_KEY);
   if (!stored) return;
-  try {
-    const decoded = atob(stored);
-    const provider = detectLegacyProvider(decoded);
-    if (!localStorage.getItem(KEY_MAP[provider])) {
-      localStorage.setItem(KEY_MAP[provider], stored);
-    }
-  } catch {
-    // chave legada corrompida — apenas remover
+  if (!localStorage.getItem(KEY_MAP.anthropic)) {
+    localStorage.setItem(KEY_MAP.anthropic, stored);
   }
   localStorage.removeItem(LEGACY_KEY);
 }

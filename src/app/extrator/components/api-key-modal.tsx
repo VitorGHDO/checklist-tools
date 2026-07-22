@@ -26,20 +26,6 @@ interface ProviderConfig {
 
 const PROVIDERS: ProviderConfig[] = [
   {
-    provider: "gemini",
-    label: "Google Gemini",
-    placeholder: "AIza...",
-    linkHref: "https://aistudio.google.com/apikey",
-    linkLabel: "Google AI Studio (gratuito)",
-  },
-  {
-    provider: "openai",
-    label: "OpenAI",
-    placeholder: "sk-...",
-    linkHref: "https://platform.openai.com/api-keys",
-    linkLabel: "OpenAI API Keys (pago)",
-  },
-  {
     provider: "anthropic",
     label: "Anthropic Claude",
     placeholder: "sk-ant-...",
@@ -50,18 +36,12 @@ const PROVIDERS: ProviderConfig[] = [
 
 export function ApiKeyModal({ isOpen, onClose }: Props) {
   const [keys, setKeys] = useState<Record<AIProvider, string>>({
-    gemini: "",
-    openai: "",
     anthropic: "",
   });
   const [show, setShow] = useState<Record<AIProvider, boolean>>({
-    gemini: false,
-    openai: false,
     anthropic: false,
   });
   const [configured, setConfigured] = useState<Record<AIProvider, boolean>>({
-    gemini: false,
-    openai: false,
     anthropic: false,
   });
 
@@ -69,13 +49,9 @@ export function ApiKeyModal({ isOpen, onClose }: Props) {
     if (!isOpen) return;
     migrateLegacyKey();
     setKeys({
-      gemini: getApiKey("gemini") ?? "",
-      openai: getApiKey("openai") ?? "",
       anthropic: getApiKey("anthropic") ?? "",
     });
     setConfigured({
-      gemini: hasApiKey("gemini"),
-      openai: hasApiKey("openai"),
       anthropic: hasApiKey("anthropic"),
     });
   }, [isOpen]);

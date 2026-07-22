@@ -1,49 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
-import type { AIProvider } from "@/lib/types";
-
-const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"];
-const OPENAI_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"];
-const ANTHROPIC_MODELS = ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"];
-
-const RETRYABLE_CODES = [503, 529];
-const MAX_RETRIES = 3;
-const BASE_DELAY_MS = 5000;
-
-async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastError = err;
-      const msg = err instanceof Error ? err.message : String(err);
-      const isRetryable = RETRYABLE_CODES.some((code) =>
-        msg.includes(`[${code}`)
-      );
-      if (!isRetryable || attempt === MAX_RETRIES) throw err;
-      const delay = BASE_DELAY_MS * attempt;
-      console.warn(`Tentativa ${attempt} falhou (retryable). Aguardando ${delay}ms...`);
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
-  }
-  throw lastError;
-}
-
-export interface MigrationField {
-  campo: string;
-  pergunta: string;
-  secao?: string;
-}
-
-function detectProvider(model: string): AIProvider {
-  if (GEMINI_MODELS.includes(model)) return "gemini";
-  if (OPENAI_MODELS.includes(model)) return "openai";
-  if (ANTHROPIC_MODELS.includes(model)) return "anthropic";
-  return "gemini";
-}
+import { withRetry, assertAnthropicKey } from "@/lib/ai";
+import type { MigrationField } from "@/lib/types";
 
 const BASE_PROMPT_BODY = `Você receberá uma lista de itens/perguntas de um checklist de entrega de veículos.
 
@@ -90,65 +48,6 @@ Retorne APENAS um JSON válido (array), sem explicações, sem markdown, sem có
   ]},
   ...
 ]`;
-}
-
-function buildOpenAISystemPrompt(checklistType?: string): string {
-  const extra = checklistType === "inspecao-pre-entrega" ? IPE_EXTRA_RULES : "";
-  return BASE_PROMPT_BODY + extra + `
-
-FORMATO DE SAÍDA OBRIGATÓRIO:
-Retorne APENAS um objeto JSON no formato {"secoes": [...]}, sem explicações ou markdown:
-{"secoes": [
-  {"secao": "Título exato da seção", "itens": [
-    {"campo": "nome_do_campo", "pergunta": "Texto completo do item de checklist"}
-  ]},
-  ...
-]}`;
-}
-
-async function callGemini(
-  apiKey: string,
-  model: string,
-  text: string,
-  checklistType?: string,
-): Promise<string> {
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const genModel = genAI.getGenerativeModel(
-    { model },
-    { apiVersion: "v1beta" }
-  );
-
-  const prompt = `${buildSystemPrompt(checklistType)}\n\nTexto do checklist corrigido:\n\n${text}\n\nRetorne o JSON agora:`;
-  const result = await genModel.generateContent({
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: { maxOutputTokens: 65536 },
-  });
-  return result.response.text();
-}
-
-async function callOpenAI(
-  apiKey: string,
-  model: string,
-  text: string,
-  checklistType?: string,
-): Promise<string> {
-  const openai = new OpenAI({ apiKey });
-
-  const response = await openai.chat.completions.create({
-    model,
-    messages: [
-      { role: "system", content: buildOpenAISystemPrompt(checklistType) },
-      {
-        role: "user",
-        content: `Texto do checklist corrigido:\n\n${text}\n\nRetorne o objeto JSON {"fields": [...]} agora:`,
-      },
-    ],
-    max_tokens: 16384,
-    temperature: 0.1,
-    response_format: { type: "json_object" },
-  });
-
-  return response.choices[0]?.message?.content ?? "{\"fields\": []}";
 }
 
 async function callClaude(
@@ -260,7 +159,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    const { text, model = "gemini-2.5-flash", apiKey, checklistType } = body as {
+    const { text, model = "claude-sonnet-4-6", apiKey, checklistType } = body as {
       text: string;
       model: string;
       apiKey: string;
@@ -273,46 +172,21 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    if (!apiKey?.trim()) {
+
+    const key = (apiKey ?? "").trim();
+    const keyError = assertAnthropicKey(key);
+    if (keyError) {
       return NextResponse.json(
-        { success: false, error: "API Key não fornecida" },
+        { success: false, error: keyError },
         { status: 400 }
       );
     }
 
-    const provider = detectProvider(model);
-
-    if (provider === "openai" && !apiKey.startsWith("sk-")) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Formato de API Key OpenAI inválido (deve começar com sk-)",
-        },
-        { status: 400 }
-      );
-    }
-    if (provider === "anthropic" && !apiKey.startsWith("sk-ant-")) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Formato de API Key Anthropic inválido (deve começar com sk-ant-)",
-        },
-        { status: 400 }
-      );
-    }
-
-    let raw: string;
-    if (provider === "gemini") {
-      raw = await withRetry(() => callGemini(apiKey, model, text, checklistType));
-    } else if (provider === "anthropic") {
-      raw = await withRetry(() => callClaude(apiKey, model, text, checklistType));
-    } else {
-      raw = await withRetry(() => callOpenAI(apiKey, model, text, checklistType));
-    }
+    const raw = await withRetry(() => callClaude(key, model, text, checklistType));
 
     const { fields, truncated } = parseFields(raw);
 
-    return NextResponse.json({ success: true, fields, truncated, model, provider });
+    return NextResponse.json({ success: true, fields, truncated, model });
   } catch (error) {
     console.error("Erro ao gerar campos de migration:", error);
     const message =

@@ -1,17 +1,6 @@
-// ==================== PDF Extraction ====================
-
-export interface ExtractResult {
-  success: boolean;
-  text?: string;
-  pages?: string[];
-  pageCount?: number;
-  method?: "pdf-parse" | "fallback";
-  error?: string;
-}
-
 // ==================== AI Correction ====================
 
-export type AIProvider = "gemini" | "openai" | "anthropic";
+export type AIProvider = "anthropic";
 
 export interface AIModel {
   id: string;
@@ -21,11 +10,6 @@ export interface AIModel {
 }
 
 export const AI_MODELS: AIModel[] = [
-  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash (recomendado)", provider: "gemini", free: true },
-  { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro (mais preciso)", provider: "gemini", free: true },
-  { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", provider: "gemini", free: true },
-  { id: "gpt-4o", name: "GPT-4o", provider: "openai", free: false },
-  { id: "gpt-4o-mini", name: "GPT-4o Mini", provider: "openai", free: false },
   { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (recomendado)", provider: "anthropic", free: false },
   { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5 (rápido)", provider: "anthropic", free: false },
 ];
@@ -41,13 +25,6 @@ export interface CorrectionOptions {
   pageNumber?: number;
 }
 
-export interface CorrectionResult {
-  success: boolean;
-  correctedText?: string;
-  model?: string;
-  error?: string;
-}
-
 // ==================== Upload / Image ====================
 
 export interface UploadedImage {
@@ -58,7 +35,9 @@ export interface UploadedImage {
   size: number;
 }
 
-// ==================== Extrator — Checklist Type ====================
+// ==================== Extrator — Projeto / Checklist Type ====================
+
+export type Project = "entrega-impecavel" | "pos-venda";
 
 export type ChecklistType = "roteiro-entrega-tecnica" | "revisao-entrega" | "inspecao-pre-entrega";
 
@@ -99,36 +78,6 @@ export interface PerguntaAssociada {
   esconderQuando: string | null;  // null → omitido; "2" = Compacto; "1;0" = revisao anomalia
   perguntaEsconderQuando: string | null;
   desativado: number;
-}
-
-// ==================== Designer (future) ====================
-
-export interface DesignerElement {
-  id: string;
-  type: "text" | "checkbox" | "image";
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  content?: string;
-  fontFamily?: string;
-  fontSize?: number;
-  fontColor?: string;
-  fontBold?: boolean;
-  fontItalic?: boolean;
-  textAlign?: "left" | "center" | "right";
-  backgroundColor?: string;
-  borderColor?: string;
-  borderWidth?: number;
-  conditionalDisplay?: string;
-  variableName?: string;
-  imagePath?: string;
-}
-
-export interface PageData {
-  id: number;
-  elements: DesignerElement[];
-  backgroundImage?: string;
 }
 
 // ─── Draft / localStorage ──────────────────────────────────────────────────

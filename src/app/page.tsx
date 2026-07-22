@@ -78,10 +78,7 @@ export default function Home() {
                 pdf-parse
               </span>
               <span className="px-2 py-0.5 rounded-full bg-[#173872]/10 text-[#173872] text-xs font-medium">
-                Gemini
-              </span>
-              <span className="px-2 py-0.5 rounded-full bg-[#173872]/10 text-[#173872] text-xs font-medium">
-                OpenAI
+                Claude
               </span>
             </div>
             <div className="flex items-center gap-1 text-sm text-[#ED3237] font-medium group-hover:gap-2 transition-all">

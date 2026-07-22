@@ -12,14 +12,7 @@ import {
   Database,
 } from "lucide-react";
 import { showToast } from "@/components/ui/toast";
-import type { PerguntaAssociada, ChecklistType } from "@/lib/types";
-import type { MigrationField } from "@/app/api/generate-fields/route";
-
-interface WorkingGroup {
-  id: string;
-  baseLabel: string;
-  questions: string[];
-}
+import type { PerguntaAssociada, ChecklistType, MigrationField, WorkingGroup } from "@/lib/types";
 
 interface Props {
   groups: WorkingGroup[];
@@ -36,6 +29,30 @@ const TIPOS = [
 ];
 
 const TAMANHOS = ["col-12", "col-8", "col-6", "col-4"];
+
+/** Timestamp YYYYMMDDHHmm para o cabeçalho dos scripts SQL gerados. */
+function buildTimestamp(): string {
+  const now = new Date();
+  return (
+    now.getFullYear().toString() +
+    String(now.getMonth() + 1).padStart(2, "0") +
+    String(now.getDate()).padStart(2, "0") +
+    String(now.getHours()).padStart(2, "0") +
+    String(now.getMinutes()).padStart(2, "0")
+  );
+}
+
+/** Agrupa as perguntas associadas (statusIdx >= 0) por índice de status. */
+function groupByStatus(perguntas: PerguntaAssociada[]): Map<number, PerguntaAssociada[]> {
+  const byStatus = new Map<number, PerguntaAssociada[]>();
+  perguntas
+    .filter((p) => p.statusIdx >= 0)
+    .forEach((p) => {
+      if (!byStatus.has(p.statusIdx)) byStatus.set(p.statusIdx, []);
+      byStatus.get(p.statusIdx)!.push(p);
+    });
+  return byStatus;
+}
 
 function slugify(text: string): string {
   return text
@@ -369,22 +386,11 @@ function buildRevisaoEntregaSql(
 ): string {
   const id = parseInt(checklistId || "217");
   const esc = (s: string) => s.replace(/'/g, "''");
-  const now = new Date();
-  const ts =
-    now.getFullYear().toString() +
-    String(now.getMonth() + 1).padStart(2, "0") +
-    String(now.getDate()).padStart(2, "0") +
-    String(now.getHours()).padStart(2, "0") +
-    String(now.getMinutes()).padStart(2, "0");
+  const ts = buildTimestamp();
 
   const lines: string[] = [`-- Auto-generated SQL script #${ts} (Revisão de Entrega)`];
 
-  const assigned = perguntas.filter((p) => p.statusIdx >= 0);
-  const byStatus = new Map<number, PerguntaAssociada[]>();
-  assigned.forEach((p) => {
-    if (!byStatus.has(p.statusIdx)) byStatus.set(p.statusIdx, []);
-    byStatus.get(p.statusIdx)!.push(p);
-  });
+  const byStatus = groupByStatus(perguntas);
 
   let obsCounter = 1;
 
@@ -431,22 +437,11 @@ function buildInspecaoPreEntregaSql(
 ): string {
   const id = parseInt(checklistId || "217");
   const esc = (s: string) => s.replace(/'/g, "''");
-  const now = new Date();
-  const ts =
-    now.getFullYear().toString() +
-    String(now.getMonth() + 1).padStart(2, "0") +
-    String(now.getDate()).padStart(2, "0") +
-    String(now.getHours()).padStart(2, "0") +
-    String(now.getMinutes()).padStart(2, "0");
+  const ts = buildTimestamp();
 
   const lines: string[] = [`-- Auto-generated SQL script #${ts} (Inspeção Pré-Entrega)`];
 
-  const assigned = perguntas.filter((p) => p.statusIdx >= 0);
-  const byStatus = new Map<number, PerguntaAssociada[]>();
-  assigned.forEach((p) => {
-    if (!byStatus.has(p.statusIdx)) byStatus.set(p.statusIdx, []);
-    byStatus.get(p.statusIdx)!.push(p);
-  });
+  const byStatus = groupByStatus(perguntas);
 
   let obsCounter = 1;
 
@@ -505,12 +500,7 @@ function buildInspecaoPreEntregaDbRows(
     return `"${String(val).replace(/"/g, '""')}"`;
   };
 
-  const assigned = perguntas.filter((p) => p.statusIdx >= 0);
-  const byStatus = new Map<number, PerguntaAssociada[]>();
-  assigned.forEach((p) => {
-    if (!byStatus.has(p.statusIdx)) byStatus.set(p.statusIdx, []);
-    byStatus.get(p.statusIdx)!.push(p);
-  });
+  const byStatus = groupByStatus(perguntas);
 
   const allRows: string[] = [];
   let obsCounter = 1;
@@ -604,12 +594,7 @@ function buildRevisaoEntregaDbRows(
     return `"${String(val).replace(/"/g, '""')}"`;
   };
 
-  const assigned = perguntas.filter((p) => p.statusIdx >= 0);
-  const byStatus = new Map<number, PerguntaAssociada[]>();
-  assigned.forEach((p) => {
-    if (!byStatus.has(p.statusIdx)) byStatus.set(p.statusIdx, []);
-    byStatus.get(p.statusIdx)!.push(p);
-  });
+  const byStatus = groupByStatus(perguntas);
 
   const allRows: string[] = [];
   let obsCounter = 1;
@@ -1198,21 +1183,10 @@ export function PerguntasStatusTab({ groups, fields, checklistId, checklistType,
     }
 
     // roteiro-entrega-tecnica — existing code unchanged below
-    const now = new Date();
-    const ts =
-      now.getFullYear().toString() +
-      String(now.getMonth() + 1).padStart(2, "0") +
-      String(now.getDate()).padStart(2, "0") +
-      String(now.getHours()).padStart(2, "0") +
-      String(now.getMinutes()).padStart(2, "0");
+    const ts = buildTimestamp();
 
     const lines: string[] = [`-- Auto-generated SQL script #${ts}`];
-    const assigned = perguntas.filter((p) => p.statusIdx >= 0);
-    const byStatus = new Map<number, PerguntaAssociada[]>();
-    assigned.forEach((p) => {
-      if (!byStatus.has(p.statusIdx)) byStatus.set(p.statusIdx, []);
-      byStatus.get(p.statusIdx)!.push(p);
-    });
+    const byStatus = groupByStatus(perguntas);
 
     [...byStatus.keys()].sort((a, b) => a - b).forEach((sIdx) => {
       const items = byStatus.get(sIdx)!.sort((a, b) => a.ordem - b.ordem);
