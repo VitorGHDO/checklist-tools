@@ -9,15 +9,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm run dev       # start dev server (localhost:3000)
 npm run build     # production build
+npm run start     # run the production build
 npm run lint      # ESLint
-npx prisma generate          # regenerate Prisma client after schema changes
-npx prisma db push           # sync schema to database
-npx prisma studio            # open Prisma GUI
-```
-
-Docker:
-```bash
-docker compose up --build    # build and run with MySQL via docker-compose
 ```
 
 There are no tests configured.
@@ -44,8 +37,6 @@ src/
   lib/
     types.ts                   # All shared TypeScript types and constants
     utils.ts                   # cleanEntregaImpecavelText, diff helpers, etc.
-    prisma.ts                  # Prisma singleton
-prisma/schema.prisma           # MySQL schema
 ```
 
 ### Multi-step extractor flow
@@ -62,9 +53,9 @@ prisma/schema.prisma           # MySQL schema
 
 API keys are stored **client-side only** (base64 in `localStorage`). They are sent from the browser to the Next.js API routes in the request body — they are never persisted server-side.
 
-### Database
+### Persistence
 
-MySQL via Prisma. Key tables: `checklist`, `checklist_perguntas` (questions/fields per checklist), `consultor`, `mecanico`, `concessionaria`. `DATABASE_URL` must be set in `.env.local`.
+No server-side database. Work-in-progress checklists are saved as drafts in the browser (`localStorage`); the app's output is generated code/text (Laravel migration PHP and `checklist_status` SQL) that is copied out and applied elsewhere.
 
 ### AI models
 
