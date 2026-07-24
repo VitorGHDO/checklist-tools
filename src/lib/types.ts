@@ -101,35 +101,9 @@ export interface PerguntaAssociada {
   desativado: number;
 }
 
-// ==================== Designer (future) ====================
-
-export interface DesignerElement {
-  id: string;
-  type: "text" | "checkbox" | "image";
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  content?: string;
-  fontFamily?: string;
-  fontSize?: number;
-  fontColor?: string;
-  fontBold?: boolean;
-  fontItalic?: boolean;
-  textAlign?: "left" | "center" | "right";
-  backgroundColor?: string;
-  borderColor?: string;
-  borderWidth?: number;
-  conditionalDisplay?: string;
-  variableName?: string;
-  imagePath?: string;
-}
-
-export interface PageData {
-  id: number;
-  elements: DesignerElement[];
-  backgroundImage?: string;
-}
+// ==================== Designer ====================
+// Os tipos do Designer de PDF vivem em `src/lib/designer/types.ts`
+// (DesignerProject, DesignerPage, DesignerGroup, Marker, HeaderField, ...).
 
 // ─── Draft / localStorage ──────────────────────────────────────────────────
 

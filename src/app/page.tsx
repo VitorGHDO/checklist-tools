@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
-import { FileText, PenTool, ArrowRight, Lock } from "lucide-react";
+import { FileText, PenTool, ArrowRight } from "lucide-react";
 
 export default function Home() {
   return (
@@ -89,43 +89,40 @@ export default function Home() {
             </div>
           </Link>
 
-          {/* Designer — Em breve */}
-          <div
-            className="relative overflow-hidden rounded-xl border border-[#e8e8e8] bg-[#F9F9F9] p-6 opacity-60 cursor-not-allowed"
-            style={{ boxShadow: "0px 0px 20px 0px rgba(76,87,125,0.02)" }}
+          {/* Designer */}
+          <Link
+            href="/designer"
+            className="group relative overflow-hidden rounded-xl border border-[#e8e8e8] bg-white p-6 transition-all hover:border-[#ED3237]/40 hover:shadow-md"
+            style={{ boxShadow: "0px 0px 20px 0px rgba(76,87,125,0.04)" }}
           >
             <div className="flex items-start gap-4 mb-4">
-              <div className="p-3 rounded-lg bg-[#e8e8e8] text-[#80808F]">
+              <div className="p-3 rounded-lg bg-[#ED3237]/10 text-[#ED3237]">
                 <PenTool className="w-6 h-6" />
               </div>
               <div className="flex-1">
-                <h3 className="font-semibold text-base mb-1 text-[#464E5F] flex items-center gap-2">
+                <h3 className="font-semibold text-base mb-1 text-[#464E5F]">
                   Designer de PDF
-                  <span className="px-2 py-0.5 rounded-full bg-[#FFB822]/20 text-[#80808F] text-xs font-normal">
-                    Em breve
-                  </span>
                 </h3>
                 <p className="text-sm text-[#80808F]">
-                  Monte checklists visuais com drag & drop e exporte em PDF.
+                  Calibre as marcações sobre a folha e gere o código PHP/TCPDF pronto.
                 </p>
               </div>
             </div>
             <div className="flex flex-wrap gap-2 mb-4">
-              <span className="px-2 py-0.5 rounded-full bg-[#e8e8e8] text-[#80808F] text-xs">
-                Drag & Drop
-              </span>
-              <span className="px-2 py-0.5 rounded-full bg-[#e8e8e8] text-[#80808F] text-xs">
+              <span className="px-2 py-0.5 rounded-full bg-[#173872]/10 text-[#173872] text-xs font-medium">
                 Canvas
               </span>
-              <span className="px-2 py-0.5 rounded-full bg-[#e8e8e8] text-[#80808F] text-xs">
-                jsPDF
+              <span className="px-2 py-0.5 rounded-full bg-[#173872]/10 text-[#173872] text-xs font-medium">
+                TCPDF
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-[#173872]/10 text-[#173872] text-xs font-medium">
+                Calibração
               </span>
             </div>
-            <div className="flex items-center gap-1.5 text-sm text-[#80808F]">
-              <Lock className="w-3.5 h-3.5" />
-              Fase 2
+            <div className="flex items-center gap-1 text-sm text-[#ED3237] font-medium group-hover:gap-2 transition-all">
+              Acessar <ArrowRight className="w-4 h-4" />
             </div>
-          </div>
+          </Link>
         </div>
       </main>
 
