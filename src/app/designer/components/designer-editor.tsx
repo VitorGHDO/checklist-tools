@@ -4,6 +4,8 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
+  ChevronsDownUp,
+  ChevronsUpDown,
   PenTool,
   Plus,
   X,
@@ -41,7 +43,14 @@ import { CalibrationPanel } from "./calibration-panel";
 import { ExportPanel } from "./export-panel";
 import { MigrationImportModal } from "./migration-import-modal";
 import { ImportFromExtractorModal } from "./import-from-extractor-modal";
-import type { DesignerDocType, DesignerPage, EditorState, HeaderFieldTipo, ViewMode } from "@/lib/designer/types";
+import type {
+  DesignerDocType,
+  DesignerGroup,
+  DesignerPage,
+  EditorState,
+  HeaderFieldTipo,
+  ViewMode,
+} from "@/lib/designer/types";
 import type { ChecklistDraft } from "@/lib/types";
 
 const HEADER_FIELD_BTNS: { tipo: HeaderFieldTipo; label: string; icon: React.ElementType }[] = [
@@ -76,6 +85,7 @@ function createInitialState(): EditorState {
     selectedGroupId: null,
     selectedHeaderFieldId: null,
     captureMode: null,
+    collapsedGroups: {},
     geomTick: 0,
   };
 }
@@ -100,6 +110,7 @@ function loadInitialState(): EditorState {
             selectedGroupId: null,
             selectedHeaderFieldId: null,
             captureMode: null,
+            collapsedGroups: {},
             geomTick: 0,
           };
         }
@@ -199,6 +210,7 @@ export default function DesignerEditor() {
       showToast("Rascunho sem campos utilizáveis.", "error");
       return;
     }
+    collapseImported(created);
     commit();
     showToast(`${created.length} grupo(s) importado(s) do Extrator.`, "success");
   }
@@ -272,6 +284,20 @@ export default function DesignerEditor() {
     commit();
   }
 
+  /** Recolhe/expande todos os grupos da página de uma vez. */
+  function setAllGroupsCollapsed(p: DesignerPage, collapse: boolean) {
+    p.groups.forEach((g) => {
+      if (collapse) st.collapsedGroups[g.id] = true;
+      else delete st.collapsedGroups[g.id];
+    });
+    rerender();
+  }
+
+  /** Grupos importados em lote entram recolhidos — só o nome aparece na lista. */
+  function collapseImported(created: DesignerGroup[]) {
+    if (created.length > 1) created.forEach((g) => (st.collapsedGroups[g.id] = true));
+  }
+
   function addPage() {
     let p: DesignerPage;
     if (st.viewMode === "cabecalho") {
@@ -340,11 +366,18 @@ export default function DesignerEditor() {
 
   const showAutomation = page?.kind === "checklist" && page.groups.length > 1;
 
+  // contadores de recolhimento (para o botão "recolher/expandir todos")
+  const collapsedCount = page ? page.groups.filter((g) => st.collapsedGroups[g.id]).length : 0;
+  const expandedCount = page ? page.groups.length - collapsedCount : 0;
+  const allGroupsCollapsed = !!page && page.groups.length > 0 && expandedCount === 0;
+
   return (
-    <div className="min-h-screen bg-[#e6e6e6] text-[#464E5F] flex flex-col">
+    // altura travada na viewport: o palco e a sidebar rolam de forma independente,
+    // sem que a rolagem dos grupos arraste a folha do canvas.
+    <div className="h-screen overflow-hidden bg-[#e6e6e6] text-[#464E5F] flex flex-col">
       {/* Header */}
       <header
-        className="sticky top-0 z-40 bg-white border-b border-[#e8e8e8]"
+        className="shrink-0 z-40 bg-white border-b border-[#e8e8e8]"
         style={{ boxShadow: "0px 10px 30px 0px rgba(82,63,105,0.05)" }}
       >
         <div className="max-w-[1600px] mx-auto px-4 h-16 flex items-center justify-between">
@@ -377,7 +410,7 @@ export default function DesignerEditor() {
       </header>
 
       {/* Toolbar: docType + modo */}
-      <div className="bg-white border-b border-[#e8e8e8]">
+      <div className="shrink-0 bg-white border-b border-[#e8e8e8]">
         <div className="max-w-[1600px] mx-auto px-4 py-3 flex flex-wrap items-center gap-2">
           <div className="flex flex-wrap gap-1.5">
             {DOCTYPES.map((d) => {
@@ -426,8 +459,8 @@ export default function DesignerEditor() {
       {/* Corpo: palco + sidebar */}
       <div className="flex-1 flex min-h-0 max-w-[1600px] w-full mx-auto">
         {/* Palco */}
-        <div className="flex-1 flex flex-col min-w-0">
-          <div className="flex items-center gap-1 px-3 pt-3 overflow-x-auto">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0">
+          <div className="shrink-0 flex items-center gap-1 px-3 pt-3 overflow-x-auto">
             {visiblePages.map((p) => (
               <div
                 key={p.id}
@@ -480,7 +513,7 @@ export default function DesignerEditor() {
             />
           )}
 
-          <div className="border-t border-[#e8e8e8] bg-white px-4 py-2 text-xs font-mono text-[#80808F] flex justify-between gap-3">
+          <div className="shrink-0 border-t border-[#e8e8e8] bg-white px-4 py-2 text-xs font-mono text-[#80808F] flex justify-between gap-3">
             <span className="truncate">
               {leftStatus} · {st.docType}/{st.viewMode}
             </span>
@@ -491,7 +524,7 @@ export default function DesignerEditor() {
         </div>
 
         {/* Sidebar */}
-        <aside className="w-[400px] shrink-0 bg-white border-l border-[#e8e8e8] overflow-y-auto">
+        <aside className="w-[400px] shrink-0 min-h-0 bg-white border-l border-[#e8e8e8] overflow-y-auto overscroll-contain">
           {/* Página */}
           <div className="p-4 border-b border-[#e8e8e8] space-y-3">
             <h2 className="text-[10.5px] uppercase tracking-wider text-[#80808F] font-semibold">Página</h2>
@@ -540,8 +573,10 @@ export default function DesignerEditor() {
           {/* Grupos (checklist) */}
           {page?.kind === "checklist" && (
             <div className="p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-[10.5px] uppercase tracking-wider text-[#80808F] font-semibold">Grupos da página</h2>
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-[10.5px] uppercase tracking-wider text-[#80808F] font-semibold whitespace-nowrap">
+                  Grupos <span className="text-[#b0b0bf]">({page.groups.length})</span>
+                </h2>
                 <div className="flex gap-1.5">
                   <button
                     onClick={() => setExtrOpen(true)}
@@ -571,6 +606,26 @@ export default function DesignerEditor() {
                   </button>
                 </div>
               </div>
+
+              {page.groups.length > 1 && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setAllGroupsCollapsed(page, !allGroupsCollapsed)}
+                    className="flex items-center gap-1 px-2 py-1 rounded bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] text-[#464E5F] text-[11px]"
+                    title={
+                      allGroupsCollapsed
+                        ? "Expandir todos os grupos"
+                        : "Recolher todos os grupos — mostra só os nomes na lista"
+                    }
+                  >
+                    {allGroupsCollapsed ? <ChevronsUpDown className="w-3 h-3" /> : <ChevronsDownUp className="w-3 h-3" />}
+                    {allGroupsCollapsed ? "expandir todos" : "recolher todos"}
+                  </button>
+                  <span className="text-[10px] text-[#80808F]">
+                    {expandedCount} de {page.groups.length} expandido{expandedCount === 1 ? "" : "s"}
+                  </span>
+                </div>
+              )}
 
               {showAutomation && (
                 <div className="border border-[#e0e0e0] rounded-lg p-2.5 space-y-1.5 bg-[#F9F9F9]">
@@ -684,6 +739,7 @@ export default function DesignerEditor() {
               showToast("Nada reconhecido. Use //TÍTULO // seguido das linhas de migration.", "error");
               return false;
             }
+            collapseImported(created);
             commit();
             showToast(`${created.length} grupo(s) importado(s).`, "success");
             return true;

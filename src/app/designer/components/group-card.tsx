@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { Crosshair, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Crosshair, X } from "lucide-react";
 import { showToast } from "@/components/ui/toast";
 import { POSVENDA_EXPORT_W, REVISAO_X_OFFSET, REVISAO_Y_OFFSET } from "@/lib/designer/constants";
 import { applyGroupAutomation, clamp01, syncColumnsToAll } from "@/lib/designer/geometry";
@@ -20,6 +20,7 @@ interface Props {
 export function GroupCard({ st, page, group, rerender, commit }: Props) {
   const posyRef = useRef<HTMLInputElement>(null);
   const isActive = group.id === page.activeGroupId;
+  const collapsed = !!st.collapsedGroups[group.id];
   const dt = group.docType;
 
   function liveReflow() {
@@ -34,11 +35,20 @@ export function GroupCard({ st, page, group, rerender, commit }: Props) {
     rerender();
   }
 
-  function setActive() {
-    if (page.activeGroupId !== group.id) {
-      page.activeGroupId = group.id;
-      rerender();
-    }
+  function setCollapsed(v: boolean) {
+    if (v) st.collapsedGroups[group.id] = true;
+    else delete st.collapsedGroups[group.id];
+  }
+  function toggleCollapsed() {
+    setCollapsed(!collapsed);
+    rerender();
+  }
+  /** Clique no header: ativa o grupo e, se estiver recolhido, expande. */
+  function onHeaderClick() {
+    const changed = page.activeGroupId !== group.id || collapsed;
+    page.activeGroupId = group.id;
+    setCollapsed(false);
+    if (changed) rerender();
   }
   function startCapture(mode: CaptureMode) {
     st.captureMode = mode;
@@ -128,26 +138,46 @@ export function GroupCard({ st, page, group, rerender, commit }: Props) {
   return (
     <div className={`border rounded-xl overflow-hidden ${isActive ? "border-[#173872]/40" : "border-[#e0e0e0]"}`}>
       {/* header */}
-      <div onClick={setActive} className={`flex items-center gap-2 px-3 py-2 cursor-pointer ${isActive ? "bg-[#173872]/5" : "bg-[#F9F9F9]"}`}>
+      <div onClick={onHeaderClick} className={`flex items-center gap-1.5 px-2 py-2 cursor-pointer ${isActive ? "bg-[#173872]/5" : "bg-[#F9F9F9]"}`}>
+        <button
+          onClick={(e) => { e.stopPropagation(); toggleCollapsed(); }}
+          className="shrink-0 text-[#80808F] hover:text-[#173872]"
+          title={collapsed ? "Expandir grupo" : "Recolher grupo"}
+        >
+          {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        </button>
         <span className={`w-2 h-2 rounded-full shrink-0 ${isActive ? "bg-[#173872]" : "bg-[#d0d0d0]"}`} />
-        <input
-          key={group.id + "-title"}
-          defaultValue={group.title}
-          onClick={(e) => e.stopPropagation()}
-          onChange={(e) => {
-            group.title = e.target.value;
-            rerender();
-          }}
-          className="flex-1 min-w-0 bg-transparent border-none outline-none text-xs font-semibold text-[#464E5F]"
-          title="título do grupo"
-        />
+        {collapsed ? (
+          // recolhido: texto puro, para que o clique em qualquer ponto do header expanda
+          <span className="flex-1 min-w-0 truncate text-xs font-semibold text-[#464E5F]" title={group.title}>
+            {group.title}
+          </span>
+        ) : (
+          <input
+            key={group.id + "-title"}
+            defaultValue={group.title}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => {
+              group.title = e.target.value;
+              rerender();
+            }}
+            className="flex-1 min-w-0 bg-transparent border-none outline-none text-xs font-semibold text-[#464E5F]"
+            title="título do grupo"
+          />
+        )}
+        {collapsed && (
+          <span className="text-[9.5px] font-mono text-[#b0b0bf] shrink-0" title="y inicial (mm)">
+            y{group.yStart}
+          </span>
+        )}
         <span className="text-[10px] text-[#80808F] shrink-0">{group.markers.length} itens</span>
         <button onClick={(e) => { e.stopPropagation(); removeGroup(); }} className="text-[#b0b0bf] hover:text-[#F64E60] shrink-0" title="Remover grupo">
           <X className="w-3 h-3" />
         </button>
       </div>
 
-      {/* body */}
+      {/* body — desmontado quando recolhido (evita centenas de MarkerRow no DOM) */}
+      {!collapsed && (
       <div className="p-3 space-y-2.5">
         {/* geometria comum */}
         <div className="flex items-center gap-2 flex-wrap text-xs">
@@ -336,6 +366,7 @@ export function GroupCard({ st, page, group, rerender, commit }: Props) {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

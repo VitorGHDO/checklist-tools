@@ -196,6 +196,8 @@ export interface EditorState {
   selectedGroupId: string | null;
   selectedHeaderFieldId: string | null;
   captureMode: CaptureMode;
+  /** Grupos recolhidos na sidebar (id → true). Ausente/false = expandido. Não persistido. */
+  collapsedGroups: Record<string, boolean>;
   // Bump para forçar os inputs não controlados (geometria) a ressincronizarem seu
   // valor exibido após mudanças externas (captura, drag, gerar). Não muda ao digitar.
   geomTick: number;
