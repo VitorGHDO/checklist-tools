@@ -14,6 +14,7 @@ import {
   Package,
   Search,
   ClipboardCheck,
+  CalendarCheck,
 } from "lucide-react";
 import Link from "next/link";
 import { FilesUploadStep } from "./components/files-upload-step";
@@ -26,13 +27,15 @@ import type { UploadedImage, ChecklistType, ChecklistDraft, DraftDados } from "@
 
 type Project = "entrega-impecavel" | "pos-venda";
 
-const CHECKLIST_TYPES: {
+interface TipoCard {
   id: ChecklistType | string;
   name: string;
   description: string;
   icon: React.ElementType;
   available: boolean;
-}[] = [
+}
+
+const CHECKLIST_TYPES: TipoCard[] = [
   {
     id: "pos-recebimento",
     name: "Pós Recebimento",
@@ -63,6 +66,18 @@ const CHECKLIST_TYPES: {
   },
 ];
 
+/** Tipos do Pós Venda. O plano não gera migration e o banco sai por página — por isso
+ *  fica fora da lista de Entrega Impecável, não porque seja outro projeto. */
+const POS_VENDA_TYPES: TipoCard[] = [
+  {
+    id: "plano-manutencao" as ChecklistType,
+    name: "Plano de Manutenção Programada",
+    description: "Revisões por km/meses — sem migration, banco por página",
+    icon: CalendarCheck,
+    available: true,
+  },
+];
+
 const PROJECTS = [
   {
     id: "entrega-impecavel" as Project,
@@ -74,11 +89,26 @@ const PROJECTS = [
   {
     id: "pos-venda" as Project,
     name: "Pós Venda",
-    description: "Extração de perguntas de PDFs do projeto Pós Venda",
+    description: "Planos de manutenção programada e demais checklists de Pós Venda",
     icon: ShoppingBag,
-    available: false,
+    available: true,
   },
 ];
+
+/** Tipos de checklist oferecidos em cada projeto. */
+const TYPES_BY_PROJECT: Record<Project, TipoCard[]> = {
+  "entrega-impecavel": CHECKLIST_TYPES,
+  "pos-venda": POS_VENDA_TYPES,
+};
+
+/** Projeto a que um tipo pertence — o rascunho guarda só o tipo, e retomar precisa
+ *  abrir o projeto certo (senão o plano cairia na lista de Entrega Impecável). */
+function projetoDoTipo(tipo: ChecklistType): Project {
+  const encontrado = (Object.keys(TYPES_BY_PROJECT) as Project[]).find((p) =>
+    TYPES_BY_PROJECT[p].some((t) => t.id === tipo),
+  );
+  return encontrado ?? "entrega-impecavel";
+}
 
 export default function ExtratorPage() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -120,7 +150,7 @@ export default function ExtratorPage() {
       setShowNameStep(false);
       setCurrentDraftData(draft.dados);
       if (draft.tipo) {
-        setSelectedProject("entrega-impecavel");
+        setSelectedProject(projetoDoTipo(draft.tipo));
         setChecklistType(draft.tipo);
       }
       if (draft.etapa_atual >= 3 && draft.dados.texto_extraido) {
@@ -172,6 +202,7 @@ export default function ExtratorPage() {
   }, [draftId, selectedProject, checklistType, pdfFile, currentDraftData, updateDraft]);
 
   const selectedProjectData = PROJECTS.find((p) => p.id === selectedProject);
+  const tiposDoProjeto = selectedProject ? TYPES_BY_PROJECT[selectedProject] : [];
 
   if (showNameStep) {
     return (
@@ -322,7 +353,7 @@ export default function ExtratorPage() {
             </h2>
           </div>
           <div className="p-6">
-            <div className="grid sm:grid-cols-2 gap-4">
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {PROJECTS.map((project) => {
                 const Icon = project.icon;
                 const isSelected = selectedProject === project.id;
@@ -371,7 +402,7 @@ export default function ExtratorPage() {
           </div>
         </section>
 
-        {selectedProject === "entrega-impecavel" && (
+        {tiposDoProjeto.length > 0 && (
           <>
             {/* Step 2 — Tipo de Checklist */}
             <section
@@ -392,7 +423,7 @@ export default function ExtratorPage() {
               </div>
               <div className="p-6">
                 <div className="grid sm:grid-cols-2 gap-4">
-                  {CHECKLIST_TYPES.map((ct) => {
+                  {tiposDoProjeto.map((ct) => {
                     const Icon = ct.icon;
                     const isSelected = checklistType === ct.id;
                     return (
@@ -441,7 +472,7 @@ export default function ExtratorPage() {
           </>
         )}
 
-        {selectedProject === "entrega-impecavel" && checklistType && (
+        {tiposDoProjeto.length > 0 && checklistType && (
           <>
             {/* Step 3 — PDF + Imagens */}
             <section

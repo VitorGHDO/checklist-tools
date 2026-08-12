@@ -60,7 +60,13 @@ export interface UploadedImage {
 
 // ==================== Extrator — Checklist Type ====================
 
-export type ChecklistType = "roteiro-entrega-tecnica" | "revisao-entrega" | "inspecao-pre-entrega";
+import type { PlanoManutencaoConfig } from "@/lib/extrator/plano-manutencao";
+
+export type ChecklistType =
+  | "roteiro-entrega-tecnica"
+  | "revisao-entrega"
+  | "inspecao-pre-entrega"
+  | "plano-manutencao";
 
 // ==================== Extrator — Perguntas por Status ====================
 
@@ -122,9 +128,15 @@ export interface WorkingGroup {
 export interface DraftDados {
   texto_extraido: string;
   texto_corrigido: string;
+  /** Nº de folhas do checklist, medido pelas imagens de referência enviadas (uma por
+   *  folha). O Designer usa isso como alvo em vez de estimar a quantidade de folhas. */
+  paginas_referencia?: number;
   campos_gerados: MigrationField[];
   working_groups: WorkingGroup[];
   migration_table_name: string;
+  /** Plano de manutenção: revisões, formulario e rótulos usados na geração do banco.
+   *  Ausente nos outros tipos de checklist. */
+  plano_manutencao?: PlanoManutencaoConfig;
   checklist_id: string;
   status_sql: string;
   status_db: string;

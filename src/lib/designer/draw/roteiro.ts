@@ -1,7 +1,11 @@
 // Desenho das marcações do docType "roteiro" — portado de drawRoteiroGroupMarkers.
 
 import type { DesignerGroup, DesignerPage } from "../types";
+import { isMirrored, mirrorTargetIndex } from "../mirror";
 import { drawSymbol, typeColor } from "./symbols";
+
+/** Cor do badge de um rótulo de referência, para separá-lo dos itens com resposta própria. */
+const MIRROR_COLOR = "#8950FC";
 
 export function drawRoteiroGroupMarkers(
   ctx: CanvasRenderingContext2D,
@@ -13,12 +17,16 @@ export function drawRoteiroGroupMarkers(
   selectedMarkerId: string | null
 ): void {
   group.markers.forEach((m, idx) => {
-    const type = m.type || "check";
+    // Rótulo de referência imprime a marcação do item seguinte — o preview mostra o
+    // mesmo símbolo, que é justamente a coerência visual que se quer conferir aqui.
+    const mirrored = isMirrored(group, idx);
+    const srcIdx = mirrored ? mirrorTargetIndex(group.markers, idx) : idx;
+    const type = group.markers[srcIdx].type || "check";
     const x = (m.fx ?? 0) * cv.width;
     const y = m.fy * cv.height;
     const isSel = m.id === selectedMarkerId;
     const tColor = typeColor(type);
-    const badgeColor = isSel ? "#f2a94a" : tColor;
+    const badgeColor = isSel ? "#f2a94a" : mirrored ? MIRROR_COLOR : tColor;
 
     const relOffMm = page.typeOffsets[type as "check" | "x" | "na"] || 0;
     const relOffPx = (relOffMm / page.heightMm) * cv.height;

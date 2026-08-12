@@ -3,9 +3,35 @@
 // (ver scripts/designer-export-parity). Funções puras; recebem pages/page em vez de globais.
 
 import { REVISAO_X_OFFSET, REVISAO_Y_OFFSET } from "./constants";
+import { isMirrored, resolveMarkerFields } from "./mirror";
 import type { DesignerGroup, DesignerPage, HeaderField } from "./types";
 
 export type ExportFmt = "campos" | "y" | "xy";
+
+const MIRROR_NOTE =
+  "// linhas de referência: repetem a marcação do item seguinte (rótulo sem resposta própria)";
+
+/**
+ * Chamadas avulsas para os rótulos de referência. Necessário sempre que o formato indexa
+ * as posições por nome de campo (`'campo' => y`): como o rótulo usa o campo do item
+ * seguinte, ele colidiria com a chave dele e o PHP manteria só uma das posições.
+ */
+function mirrorCallLines(
+  group: DesignerGroup,
+  fields: string[],
+  ys: number[],
+  prec: number,
+  xArg?: (i: number) => string,
+): string[] {
+  const out: string[] = [];
+  group.markers.forEach((_, i) => {
+    if (!isMirrored(group, i)) return;
+    if (out.length === 0) out.push(MIRROR_NOTE);
+    const pos = xArg ? `${ys[i].toFixed(prec)}, ${xArg(i)}` : ys[i].toFixed(prec);
+    out.push(`printChecklistMark($pdf, $dadosChecklist['${phpEscape(fields[i])}'], ${pos});`);
+  });
+  return out;
+}
 
 export function phpEscape(str: string): string {
   return String(str).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
@@ -93,6 +119,11 @@ function generateCompactBlockForGroup(
     }
   }
 
+  // Campos efetivos: rótulos de referência do roteiro emprestam o campo do item seguinte.
+  // Fora do roteiro isto devolve os próprios labels, então nada muda.
+  const fields = resolveMarkerFields(group);
+  const hasMirror = group.markers.some((_, i) => isMirrored(group, i));
+
   const lines: string[] = [];
   if (!isDefaultGroupTitle(group.title)) lines.push("/** " + group.title + " */");
   let endY: number | null = null;
@@ -112,8 +143,11 @@ function generateCompactBlockForGroup(
 
   if (uniform) {
     const varName = slugifyVarName(group.title, "campos", usedNames);
+    // O array é percorrido em ordem com $posY += inc, então o campo repetido imprime a
+    // mesma marcação na linha do rótulo e na do item — não precisa de chamada avulsa.
+    if (hasMirror) lines.push(MIRROR_NOTE);
     lines.push(`$${varName} = [`);
-    lines.push(formatCamposArray(group.markers.map((m) => m.label)));
+    lines.push(formatCamposArray(fields));
     lines.push("];");
     if (chainFrom === null || chainFrom === undefined) {
       const posYInicial = (ys[0] - inc).toFixed(prec);
@@ -130,12 +164,14 @@ function generateCompactBlockForGroup(
     lines.push("// (posições deste grupo não seguem um incremento único — mantido em array explícito)");
     lines.push(`$${varName} = [`);
     group.markers.forEach((m, i) => {
-      lines.push(`\t'${phpEscape(m.label)}' => ${ys[i].toFixed(prec)},`);
+      if (isMirrored(group, i)) return; // sai depois, avulso: a chave colidiria com a do item
+      lines.push(`\t'${phpEscape(fields[i])}' => ${ys[i].toFixed(prec)},`);
     });
     lines.push("];");
     lines.push(`foreach ($${varName} as $campo => $y) {`);
     lines.push("\tprintChecklistMark($pdf, $dadosChecklist[$campo], $y);");
     lines.push("}");
+    lines.push(...mirrorCallLines(group, fields, ys, prec));
     endY = null;
   }
   return { code: lines.join("\n"), endY, uniform };
@@ -442,18 +478,27 @@ export function generateCodeForPage(
   } else {
     const isPosvendaPage = page.docType === "posvenda";
     const lines: string[] = [];
+    const mirrorTail: string[] = [];
     lines.push("$posicoes = [");
     groupsWithMarkers.forEach((g) => {
+      const fields = resolveMarkerFields(g);
+      const ys = g.markers.map((m) => m.fy * page.heightMm - cellHalf + offY);
+      const xOf = (i: number) => ((g.markers[i].fx ?? 0) * page.widthMm - cellWHalf + offX).toFixed(prec);
       lines.push("    // ===== " + g.title + " =====");
-      g.markers.forEach((m) => {
-        const y = (m.fy * page.heightMm - cellHalf + offY).toFixed(prec);
-        const x = ((m.fx ?? 0) * page.widthMm - cellWHalf + offX).toFixed(prec);
+      g.markers.forEach((m, i) => {
+        // Rótulo de referência: fica fora do array (a chave colidiria com a do item) e
+        // sai como chamada avulsa depois do foreach.
+        if (isMirrored(g, i)) return;
+        const y = ys[i].toFixed(prec);
         if (fmt === "y" && !isPosvendaPage) {
-          lines.push(`    '${phpEscape(m.label)}' => ${y},`);
+          lines.push(`    '${phpEscape(fields[i])}' => ${y},`);
         } else {
-          lines.push(`    '${phpEscape(m.label)}' => ['x' => ${x}, 'y' => ${y}],`);
+          lines.push(`    '${phpEscape(fields[i])}' => ['x' => ${xOf(i)}, 'y' => ${y}],`);
         }
       });
+      mirrorTail.push(
+        ...mirrorCallLines(g, fields, ys, prec, fmt === "y" && !isPosvendaPage ? undefined : xOf),
+      );
     });
     lines.push("];");
     const usePos = fmt !== "y" || isPosvendaPage;
@@ -466,6 +511,7 @@ export function generateCodeForPage(
       lines.push("    printChecklistMark($pdf, $dadosChecklist[$campo], $pos['y'], $pos['x']);");
     }
     lines.push("}");
+    lines.push(...mirrorTail);
     body = lines.join("\n");
   }
 

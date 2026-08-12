@@ -61,6 +61,23 @@ export function HeaderFieldCard({ st, page, field, rerender, commit }: Props) {
       </div>
 
       <div className="p-3 space-y-2 text-xs">
+        {/* Só o plano de manutenção emite as folhas numa função só; nos outros tipos
+            cada folha é gerada em separado e a repetição não faz sentido. */}
+        {page.docType === "manutencao" && !page.footerLike && (
+          <label className="flex items-center gap-2 text-[11px] text-[#464E5F] cursor-pointer">
+            <input
+              type="checkbox"
+              defaultChecked={!!field.todasFolhas}
+              key={gk("tf")}
+              onChange={(e) => {
+                field.todasFolhas = e.target.checked;
+                rerender();
+              }}
+            />
+            repetir em todas as folhas (ex.: o modelo no topo)
+          </label>
+        )}
+
         {field.tipo === "texto" && (
           <>
             <div className="flex items-center gap-2 flex-wrap">

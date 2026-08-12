@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Copy, Download, FileCode, Files } from "lucide-react";
+import { Copy, Download, FileCode, Files, TriangleAlert } from "lucide-react";
 import { showToast } from "@/components/ui/toast";
 import { generateAllPagesCode, generateCodeForPage, type ExportFmt } from "@/lib/designer/export-php";
+import { generateManutencaoFile, nomeFuncao } from "@/lib/designer/export-manutencao";
+import { getManutencaoConfig } from "@/lib/designer/manutencao";
 import type { DesignerPage, EditorState } from "@/lib/designer/types";
 
 interface Props {
@@ -26,17 +28,38 @@ export function ExportPanel({ st, page }: Props) {
   const [prec, setPrec] = useState(2);
   const [includeFunc, setIncludeFunc] = useState(true);
 
-  const code = generateCodeForPage(st.pages, page, fmt, prec, includeFunc);
+  // No plano de manutenção a saída é o arquivo inteiro (uma função para as N folhas),
+  // não um bloco por folha — os seletores de formato não se aplicam.
+  const manutCfg = page.docType === "manutencao" ? getManutencaoConfig(st.pages) : null;
+  const manut = manutCfg ? generateManutencaoFile(st.pages, manutCfg, prec) : null;
+  const code = manut ? manut.code : generateCodeForPage(st.pages, page, fmt, prec, includeFunc);
   const isHeader = page.kind === "header";
+  const showFmt = !isHeader && !manut;
 
   return (
     <div className="border-t border-[#e8e8e8] p-4 space-y-2.5">
       <h2 className="text-[10.5px] uppercase tracking-wider text-[#80808F] font-semibold flex items-center gap-1.5">
         <FileCode className="w-3.5 h-3.5 text-[#FFB822]" />
         Exportar PHP
+        {manut && (
+          <span className="normal-case tracking-normal text-[10px] text-[#173872] font-mono">
+            {nomeFuncao("gerarDesenho", manutCfg!)}()
+          </span>
+        )}
       </h2>
 
-      {!isHeader && (
+      {manut && manut.avisos.length > 0 && (
+        <div className="rounded-lg border border-[#FFB822]/40 bg-[#FFB822]/10 px-3 py-2 space-y-1">
+          {manut.avisos.map((a, i) => (
+            <p key={i} className="text-[10.5px] text-[#464E5F] flex items-start gap-1.5 leading-snug">
+              <TriangleAlert className="w-3 h-3 text-[#FFB822] shrink-0 mt-0.5" />
+              {a}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {showFmt && (
         <div className="flex items-center gap-1.5 flex-wrap">
           <select
             value={fmt}
@@ -59,11 +82,18 @@ export function ExportPanel({ st, page }: Props) {
         </div>
       )}
 
-      {!isHeader && (
+      {showFmt && (
         <label className="flex items-center gap-2 text-[11px] text-[#80808F] cursor-pointer">
           <input type="checkbox" checked={includeFunc} onChange={(e) => setIncludeFunc(e.target.checked)} />
           incluir a definição da função de marcação (só na 1ª folha)
         </label>
+      )}
+
+      {manut && (
+        <p className="text-[10.5px] text-[#80808F] leading-snug">
+          Arquivo completo do plano: as {st.pages.filter((p) => p.kind === "checklist" && p.docType === "manutencao").length}{" "}
+          folha(s), o switch da revisão, os helpers de condição e a função de impressão.
+        </p>
       )}
 
       <pre className="bg-[#0a0d11] text-[#c9d6c0] border border-[#e0e0e0] rounded-lg p-3 text-[10.5px] font-mono leading-relaxed overflow-auto max-h-72 whitespace-pre">
@@ -82,12 +112,17 @@ export function ExportPanel({ st, page }: Props) {
           Copiar
         </button>
         <button
-          onClick={() => downloadText(page.name.replace(/\s+/g, "_") + "_posicoes.php", "<?php\n" + code + "\n")}
+          onClick={() =>
+            manut
+              ? downloadText(nomeFuncao("gerarDesenho", manutCfg!) + ".php", code + "\n")
+              : downloadText(page.name.replace(/\s+/g, "_") + "_posicoes.php", "<?php\n" + code + "\n")
+          }
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] text-[#464E5F] text-xs"
         >
           <Download className="w-3.5 h-3.5" />
           Baixar .php
         </button>
+        {!manut && (
         <button
           onClick={() => {
             const all = generateAllPagesCode(st.pages, page.docType, fmt, prec, includeFunc);
@@ -100,6 +135,7 @@ export function ExportPanel({ st, page }: Props) {
           <Files className="w-3.5 h-3.5" />
           Gerar tudo
         </button>
+        )}
       </div>
     </div>
   );

@@ -14,6 +14,13 @@ import {
 import { showToast } from "@/components/ui/toast";
 import type { PerguntaAssociada, ChecklistType } from "@/lib/types";
 import type { MigrationField } from "@/app/api/generate-fields/route";
+import {
+  buildPlanoDbRows,
+  buildPlanoSql,
+  opcoesDaRevisao,
+  planoConfigPadrao,
+  type PlanoManutencaoConfig,
+} from "@/lib/extrator/plano-manutencao";
 
 interface WorkingGroup {
   id: string;
@@ -27,7 +34,14 @@ interface Props {
   checklistId: string;
   checklistType: ChecklistType;
   initialPerguntas?: PerguntaAssociada[];
-  onPerguntasChange?: (data: { perguntas: PerguntaAssociada[]; sqlOutput: string; dbOutput: string }) => void;
+  /** Plano de manutenção: config salva no rascunho (revisões, formulario, botão). */
+  initialPlano?: PlanoManutencaoConfig;
+  onPerguntasChange?: (data: {
+    perguntas: PerguntaAssociada[];
+    sqlOutput: string;
+    dbOutput: string;
+    plano?: PlanoManutencaoConfig;
+  }) => void;
 }
 
 const TIPOS = [
@@ -110,6 +124,47 @@ function makeDefaults(
       desativado: 0,
     };
   }
+  if (checklistType === "plano-manutencao") {
+    // Os três status do plano são os símbolos impressos no PDF: bola, triângulo e X.
+    // O PHP do desenho compara o valor com 1, 2 e 3 — mudar esses valores quebra o
+    // casamento com o $drawIcon do Designer.
+    return {
+      id: idSuffix,
+      campo,
+      pergunta,
+      statusIdx,
+      tipo: "radio",
+      opcoes: "OK;Ajustar;Substituir",
+      valor: "1;2;3",
+      obrigatorio: 1,
+      defaultVal: null,
+      query: "",
+      ordem,
+      tamanho: "col-12",
+      selecione: "",
+      classCor: "green;yellow;red",
+      grupo,
+      ordemGrupo,
+      titulo,
+      tamanhoGrupo: "col-12",
+      boasvindas: 0,
+      editavel: 1,
+      foto: 0,
+      video: 0,
+      audio: 0,
+      extra: null,
+      utilizacao: "1",
+      orcamentoDigital: 0,
+      oportunidades: 0,
+      tamanhoCampo: 255,
+      perguntaObrigatorio: null,
+      valorObrigatorio: null,
+      esconderPerguntas: 0,
+      esconderQuando: null,
+      perguntaEsconderQuando: null,
+      desativado: 0,
+    };
+  }
   if (checklistType === "revisao-entrega") {
     return {
       id: idSuffix,
@@ -186,10 +241,13 @@ function makeDefaults(
   };
 }
 
-function buildAssociation(
+/** Exportada para poder ser exercitada fora do componente (regras de associação). */
+export function buildAssociation(
   groups: WorkingGroup[],
   fields: MigrationField[],
   checklistType: ChecklistType = "roteiro-entrega-tecnica",
+  /** ordemGrupo do 1º grupo. No plano os primeiros números ficam para dados/revisão. */
+  ordemGrupoBase = 1,
 ): PerguntaAssociada[] {
   const isRevisao = checklistType === "revisao-entrega";
   const isIPE = checklistType === "inspecao-pre-entrega";
@@ -203,6 +261,15 @@ function buildAssociation(
   const normText = (s: string) => s.trim().toLowerCase();
 
   // Metadados de cada status (grupo) + índice por nome de seção normalizado.
+  // Seções de mesmo nome (o plano repete "VEÍCULO NO SOLO" no fim da folha) precisam
+  // de chaves `grupo` distintas, senão dois grupos diferentes gravariam a mesma chave
+  // no banco com ordemGrupo diferente.
+  const usosDoSlug = new Map<string, number>();
+  const grupoUnico = (slug: string) => {
+    const n = (usosDoSlug.get(slug) ?? 0) + 1;
+    usosDoSlug.set(slug, n);
+    return n === 1 ? slug : `${slug}_${n}`;
+  };
   const groupMeta = groups.map((group, gIdx) => {
     let grupo: string;
     let titulo: string;
@@ -214,9 +281,9 @@ function buildAssociation(
       titulo = group.baseLabel.toUpperCase();
       ordemGrupo = gIdx + 3;
     } else {
-      grupo = slugify(group.baseLabel);
+      grupo = grupoUnico(slugify(group.baseLabel));
       titulo = group.baseLabel;
-      ordemGrupo = gIdx + 1;
+      ordemGrupo = gIdx + ordemGrupoBase;
     }
     return { grupo, titulo, ordemGrupo, key: normSection(group.baseLabel) };
   });
@@ -226,12 +293,35 @@ function buildAssociation(
     if (m.key && !idxByName.has(m.key)) idxByName.set(m.key, gIdx);
   });
 
+  /** Há nomes de seção repetidos? Aí o casamento por nome não basta. */
+  const nomesRepetidos = new Set(groupMeta.map((m) => m.key)).size !== groupMeta.length;
+  /** Último grupo casado — com nomes repetidos, o casamento passa a ser por ordem. */
+  let cursor = 0;
+
   // Resolve o status de um campo: 1) pela "secao" marcada pela IA (join direto,
   // robusto); 2) fallback por texto contra as perguntas do grupo (dados antigos
   // gerados antes do campo "secao"). Retorna -1 se não resolver.
   const resolveGroupIdx = (field: MigrationField): number => {
     const secao = normSection(field.secao ?? "");
     if (secao) {
+      // Com nomes repetidos, a N-ésima ocorrência da seção nos campos vai para o
+      // N-ésimo grupo com aquele nome: a busca começa no último grupo casado e só
+      // volta ao início se não achar nada dali para a frente. Sem isso, tudo cairia
+      // na primeira ocorrência e o "solo final" ficaria sem nenhuma pergunta.
+      if (nomesRepetidos) {
+        for (let gi = cursor; gi < groupMeta.length; gi++) {
+          if (groupMeta[gi].key === secao) {
+            cursor = gi;
+            return gi;
+          }
+        }
+        for (let gi = 0; gi < cursor; gi++) {
+          if (groupMeta[gi].key === secao) {
+            cursor = gi;
+            return gi;
+          }
+        }
+      }
       const exact = idxByName.get(secao);
       if (exact !== undefined) return exact;
       for (let gi = 0; gi < groupMeta.length; gi++) {
@@ -1026,7 +1116,21 @@ function GroupSection({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function PerguntasStatusTab({ groups, fields, checklistId, checklistType, initialPerguntas, onPerguntasChange }: Props) {
+export function PerguntasStatusTab({
+  groups,
+  fields,
+  checklistId,
+  checklistType,
+  initialPerguntas,
+  initialPlano,
+  onPerguntasChange,
+}: Props) {
+  const isPlano = checklistType === "plano-manutencao";
+  const [plano, setPlano] = useState<PlanoManutencaoConfig>(
+    () => initialPlano ?? planoConfigPadrao(checklistId)
+  );
+  /** ordemGrupo do 1º grupo: no plano os primeiros números ficam para dados/revisão. */
+  const ordemGrupoBase = isPlano ? plano.ordemGrupoInicial : 1;
   const [perguntas, setPerguntas] = useState<PerguntaAssociada[]>(
     initialPerguntas && initialPerguntas.length > 0 ? initialPerguntas : []
   );
@@ -1041,15 +1145,15 @@ export function PerguntasStatusTab({ groups, fields, checklistId, checklistType,
 
   useEffect(() => {
     if (!initialized) return;
-    onPerguntasChange?.({ perguntas, sqlOutput, dbOutput });
+    onPerguntasChange?.({ perguntas, sqlOutput, dbOutput, plano: isPlano ? plano : undefined });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [perguntas, sqlOutput, dbOutput, initialized]);
+  }, [perguntas, sqlOutput, dbOutput, initialized, plano, isPlano]);
 
   useEffect(() => {
     if (groups.length === 0 || fields.length === 0) return;
 
     if (!initialized) {
-      setPerguntas(buildAssociation(groups, fields, checklistType));
+      setPerguntas(buildAssociation(groups, fields, checklistType, ordemGrupoBase));
       setInitialized(true);
       return;
     }
@@ -1061,7 +1165,7 @@ export function PerguntasStatusTab({ groups, fields, checklistId, checklistType,
     // "slugify" do modelo por seção) são descartadas. Idempotente — seguro no
     // double-run do mount e ao restaurar rascunhos.
     setPerguntas((prev) => {
-      const rebuilt = buildAssociation(groups, fields, checklistType);
+      const rebuilt = buildAssociation(groups, fields, checklistType, ordemGrupoBase);
       const prevByCampo = new Map(prev.map((p) => [p.campo, p]));
       return rebuilt.map((np) => {
         const old = prevByCampo.get(np.campo);
@@ -1083,13 +1187,13 @@ export function PerguntasStatusTab({ groups, fields, checklistId, checklistType,
   }, [fields, initialized, groups]);
 
   const resetAssociation = useCallback(() => {
-    setPerguntas(buildAssociation(groups, fields, checklistType));
+    setPerguntas(buildAssociation(groups, fields, checklistType, ordemGrupoBase));
     setShowDb(false);
     setDbOutput("");
     setShowSql(false);
     setSqlOutput("");
     showToast("Associação reiniciada!", "success");
-  }, [groups, fields, checklistType]);
+  }, [groups, fields, checklistType, ordemGrupoBase]);
 
   function update(id: string, patch: Partial<PerguntaAssociada>) {
     setPerguntas((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
@@ -1184,7 +1288,17 @@ export function PerguntasStatusTab({ groups, fields, checklistId, checklistType,
     });
   }
 
+  /** Config efetiva do plano: o id do formulário cai no checklistId quando em branco. */
+  function planoEfetivo(): PlanoManutencaoConfig {
+    return { ...plano, formulario: plano.formulario.trim() || checklistId };
+  }
+
   function generateSql() {
+    if (isPlano) {
+      setSqlOutput(buildPlanoSql(perguntas, planoEfetivo()));
+      setShowSql(true);
+      return;
+    }
     if (checklistType === "revisao-entrega") {
       setSqlOutput(buildRevisaoEntregaSql(perguntas, checklistId, groups));
       setShowSql(true);
@@ -1238,8 +1352,126 @@ export function PerguntasStatusTab({ groups, fields, checklistId, checklistType,
     );
   }
 
+  const previewRevisao = isPlano ? opcoesDaRevisao(planoEfetivo()) : null;
+  const planoNum = "bg-white border border-[#e0e0e0] rounded px-2 py-1 text-xs";
+  const planoLbl = "text-[10px] uppercase tracking-wide text-[#80808F]";
+  const setPlanoField = <K extends keyof PlanoManutencaoConfig>(
+    key: K,
+    value: PlanoManutencaoConfig[K],
+  ) => setPlano((prev) => ({ ...prev, [key]: value }));
+
   return (
     <div className="space-y-4">
+      {isPlano && (
+        <div className="rounded-lg border border-[#173872]/25 bg-[#173872]/5 p-3 space-y-3">
+          <div className="flex items-center gap-2">
+            <Database className="w-4 h-4 text-[#173872]" />
+            <span className="text-sm font-semibold text-[#464E5F]">Plano de manutenção</span>
+            <span className="text-[10.5px] text-[#80808F]">
+              tabela <code className="font-mono">formulario_perguntas</code> · sem migration e sem
+              tabela de status — a coluna <code className="font-mono">pagina</code> numera as páginas
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <label className="space-y-1">
+              <span className={planoLbl}>código do formulário</span>
+              <input
+                value={plano.formulario}
+                onChange={(e) => setPlanoField("formulario", e.target.value)}
+                placeholder={checklistId || "ex.: 97"}
+                title="Coluna `formulario` — o 2º valor de cada linha e o WHERE codFormulario da query"
+                className={`${planoNum} w-full font-mono`}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className={planoLbl}>botão da página</span>
+              <input
+                value={plano.botaoPagina}
+                onChange={(e) => setPlanoField("botaoPagina", e.target.value)}
+                className={`${planoNum} w-full`}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className={planoLbl}>ordemGrupo inicial</span>
+              <input
+                type="number"
+                value={plano.ordemGrupoInicial}
+                onChange={(e) => setPlanoField("ordemGrupoInicial", parseInt(e.target.value, 10) || 1)}
+                title="ordemGrupo do 1º grupo de itens — os números antes ficam para dados/revisão"
+                className={`${planoNum} w-full font-mono`}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className={planoLbl}>revisões</span>
+              <input
+                type="number"
+                min={1}
+                value={plano.revisoes}
+                onChange={(e) => setPlanoField("revisoes", parseInt(e.target.value, 10) || 1)}
+                className={`${planoNum} w-full font-mono`}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className={planoLbl}>km da 1ª</span>
+              <input
+                type="number"
+                value={plano.kmBase}
+                onChange={(e) => setPlanoField("kmBase", parseInt(e.target.value, 10) || 0)}
+                className={`${planoNum} w-full font-mono`}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className={planoLbl}>meses da 1ª</span>
+              <input
+                type="number"
+                value={plano.mesesBase}
+                onChange={(e) => setPlanoField("mesesBase", parseInt(e.target.value, 10) || 0)}
+                className={`${planoNum} w-full font-mono`}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className={planoLbl}>grupo da revisão</span>
+              <input
+                value={plano.grupoRevisao}
+                onChange={(e) => setPlanoField("grupoRevisao", e.target.value)}
+                className={`${planoNum} w-full font-mono`}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className={planoLbl}>título da revisão</span>
+              <input
+                value={plano.tituloRevisao}
+                onChange={(e) => setPlanoField("tituloRevisao", e.target.value)}
+                className={`${planoNum} w-full`}
+              />
+            </label>
+          </div>
+
+          <label className="flex items-center gap-2 text-xs text-[#464E5F] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={plano.incluirRevisao}
+              onChange={(e) => setPlanoField("incluirRevisao", e.target.checked)}
+            />
+            incluir a pergunta <code className="font-mono">{plano.campoRevisao}</code> (o select que o
+            PHP do PDF lê para achar a coluna)
+          </label>
+
+          {plano.incluirRevisao && previewRevisao && (
+            <div className="rounded border border-[#e0e0e0] bg-white p-2 space-y-1 overflow-hidden">
+              <p className="text-[10px] uppercase tracking-wide text-[#80808F]">opções geradas</p>
+              <p className="text-[10.5px] font-mono text-[#464E5F] truncate" title={previewRevisao.opcoes}>
+                {previewRevisao.opcoes}
+              </p>
+              <p className="text-[10.5px] font-mono text-[#0BB783] truncate" title={previewRevisao.valor}>
+                {previewRevisao.valor}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Summary + toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -1247,7 +1479,7 @@ export function PerguntasStatusTab({ groups, fields, checklistId, checklistType,
             {perguntas.length} perguntas
           </span>
           <span className="px-2.5 py-1 bg-[#22B9FF]/10 text-[#22B9FF] rounded-full text-xs font-medium">
-            {groups.length} status
+            {groups.length} {isPlano ? "páginas" : "status"}
           </span>
           {compactoTotal > 0 && (
             <span className="flex items-center gap-1 px-2.5 py-1 bg-[#FFB822]/10 text-[#FFB822] rounded-full text-xs font-medium">
@@ -1273,7 +1505,9 @@ export function PerguntasStatusTab({ groups, fields, checklistId, checklistType,
           <button
             onClick={() => {
               setDbOutput(
-                checklistType === "revisao-entrega"
+                isPlano
+                  ? buildPlanoDbRows(perguntas, planoEfetivo())
+                  : checklistType === "revisao-entrega"
                   ? buildRevisaoEntregaDbRows(perguntas, checklistId, groups)
                   : checklistType === "inspecao-pre-entrega"
                   ? buildInspecaoPreEntregaDbRows(perguntas, checklistId, groups)

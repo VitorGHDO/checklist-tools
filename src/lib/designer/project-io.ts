@@ -26,6 +26,8 @@ export function normalizeLoadedPage(p: LoosePage): DesignerPage {
   if (p.syncCols === undefined) p.syncCols = true;
   if (p.pushCols === undefined) p.pushCols = true;
   if (p.chainY === undefined) p.chainY = true;
+  if (p.syncIncrement === undefined) p.syncIncrement = true;
+  if (p.pushBelow === undefined) p.pushBelow = true;
 
   if (p.kind === "checklist") {
     if (p.groups.length === 0 && !p.markers) {
@@ -71,6 +73,11 @@ export function normalizeLoadedPage(p: LoosePage): DesignerPage {
         if (g.optH === undefined) g.optH = 5;
         g.markers.forEach((m) => {
           if (!m.type) m.type = g.posvendaOpts![0].valor;
+        });
+      } else if (g.docType === "manutencao") {
+        // 1 = bola, 2 = triângulo, 3 = X — o mesmo código que o banco grava.
+        g.markers.forEach((m) => {
+          if (!m.type) m.type = "1";
         });
       } else {
         g.markers.forEach((m) => {

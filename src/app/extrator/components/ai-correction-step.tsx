@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, Fragment } from "react";
 import {
   Sparkles,
   Layers,
@@ -17,10 +17,17 @@ import {
   Plus,
   Pencil,
   Database,
+  Trash2,
 } from "lucide-react";
 import { showToast } from "@/components/ui/toast";
 import { AI_MODELS, type UploadedImage, type ChecklistType, type DraftDados, type PerguntaAssociada } from "@/lib/types";
 import { getApiKey as getProviderApiKey } from "@/lib/api-keys";
+import {
+  aplicarModoKmTempo,
+  modoKmTempo,
+  type ModoKmTempo,
+  type PlanoManutencaoConfig,
+} from "@/lib/extrator/plano-manutencao";
 import type { MigrationField } from "@/app/api/generate-fields/route";
 import Image from "next/image";
 import { PerguntasStatusTab } from "./perguntas-status-tab";
@@ -267,14 +274,22 @@ export function AiCorrectionStep({
   function parseSectionsFromText(text: string): { id: string; name: string; questions: string[] }[] {
     const isRevisao = checklistType === "revisao-entrega";
     const isIPE = checklistType === "inspecao-pre-entrega";
+    const isPlano = checklistType === "plano-manutencao";
 
     // IPE: headers match "A - TITLE" pattern (letter + dash)
-    // revisao-entrega: ALL-CAPS lines (no lowercase letters)
+    // revisao-entrega e plano-manutencao: ALL-CAPS lines (no lowercase letters) —
+    //   no plano são as posições do veículo ("VEICULO NO SOLO", "MEIA ALTURA")
     // roteiro-entrega-tecnica: lines starting with a digit followed by an uppercase letter
+    const semMinuscula = (line: string) =>
+      line.length > 2 && !/[a-záéíóúâêîôûãõçàèìòùäëïöü]/.test(line);
     const isSectionHeader = isIPE
       ? (line: string) => /^[A-E]\s*-\s+[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ]/i.test(line)
+      : isPlano
+      ? // no plano as notas de rodapé ("(1)", "12.000") também não têm minúscula —
+        // a seção precisa ter pelo menos uma letra
+        (line: string) => semMinuscula(line) && /[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ]/.test(line)
       : isRevisao
-      ? (line: string) => line.length > 2 && !/[a-záéíóúâêîôûãõçàèìòùäëïöü]/.test(line)
+      ? semMinuscula
       : (line: string) => /^\d+\s+[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇÀÈÌÒÙÄËÏÖÜ]/.test(line);
 
     const lines = text.split("\n");
@@ -287,7 +302,7 @@ export function AiCorrectionStep({
         if (current) sections.push(current);
         const name = isIPE
           ? line.trim().toUpperCase()
-          : isRevisao
+          : isRevisao || isPlano
           ? line.trim()
           : line.replace(/^\d+\s+/, "").replace(/\s+STATUS\s*$/i, "").trim();
         current = { id: `sec-${sections.length}`, name, questions: [] };
@@ -296,6 +311,17 @@ export function AiCorrectionStep({
       }
     }
     if (current) sections.push(current);
+
+    // Sem nenhum cabeçalho reconhecido o fluxo travava: a aba do banco só aparece
+    // com grupos, e sem grupos não havia como criar nenhum. Um grupo único com tudo
+    // deixa o usuário seguir e reagrupar à mão na aba Status / Seções.
+    if (sections.length === 0) {
+      const linhas = text
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l && !l.startsWith("---"));
+      if (linhas.length) return [{ id: "sec-0", name: "Geral", questions: linhas }];
+    }
     return sections;
   }
 
@@ -386,6 +412,25 @@ export function AiCorrectionStep({
     });
   }
 
+  // Remove a seção. Serve para os cabeçalhos que não são seção de verdade — no plano
+  // de manutenção o bloco "NOTAS" do rodapé casa com a heurística de ALL-CAPS e vira
+  // uma página vazia. Os campos que apontavam para ela caem em "Não Associadas" na aba
+  // Perguntas, e não somem sem aviso.
+  function handleDeleteGroup(idx: number) {
+    const group = workingGroups[idx];
+    if (!group) return;
+    const qCount = group.questions.length;
+    if (
+      qCount > 0 &&
+      !confirm(
+        `Remover a seção "${group.baseLabel}" e suas ${qCount} pergunta${qCount !== 1 ? "s" : ""}?`
+      )
+    )
+      return;
+    setWorkingGroups((prev) => prev.filter((_, i) => i !== idx));
+    showToast("Seção removida!", "success");
+  }
+
   function handleAddGroup() {
     setWorkingGroups((prev) => [
       ...prev,
@@ -418,6 +463,8 @@ export function AiCorrectionStep({
     onDataChange?.({
       texto_extraido: extractedText,
       texto_corrigido: correctedText,
+      // uma imagem de referência por folha do checklist — o Designer usa como alvo
+      paginas_referencia: images.length || extractedPages.length || undefined,
       campos_gerados: migrationFields,
       working_groups: workingGroups,
       migration_table_name: migrationTableName,
@@ -426,18 +473,20 @@ export function AiCorrectionStep({
       status_db: statusDbOutput,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extractedText, correctedText, migrationFields, workingGroups, migrationTableName, checklistId, statusSqlOutput, statusDbOutput]);
+  }, [extractedText, correctedText, images.length, extractedPages.length, migrationFields, workingGroups, migrationTableName, checklistId, statusSqlOutput, statusDbOutput]);
 
   const handlePerguntasChange = useCallback(
     (perguntasData: {
       perguntas: PerguntaAssociada[];
       sqlOutput: string;
       dbOutput: string;
+      plano?: PlanoManutencaoConfig;
     }) => {
       onDataChange?.({
         perguntas: perguntasData.perguntas,
         perguntas_sql: perguntasData.sqlOutput,
         perguntas_db: perguntasData.dbOutput,
+        plano_manutencao: perguntasData.plano,
       });
     },
     [onDataChange]
@@ -445,9 +494,22 @@ export function AiCorrectionStep({
 
   function buildMigrationCode(tableName: string, fields: MigrationField[]): string {
     const safeTable = tableName.trim() || "tabela_generica";
-    const cols = fields
-      .map((f) => `            $table->integer('${f.campo}')->nullable();`)
-      .join("\n");
+    // Os títulos de seção entram como comentários "//SEÇÃO //" — além de identificar os
+    // blocos, é o formato que o Designer de PDF reconhece ao colar esta migration nele.
+    const lines: string[] = [];
+    let lastSecao: string | null = null;
+    fields.forEach((f) => {
+      const secao = (f.secao || "").trim();
+      if (secao !== lastSecao) {
+        if (secao) {
+          if (lines.length) lines.push("");
+          lines.push(`            //${secao} //`);
+        }
+        lastSecao = secao;
+      }
+      lines.push(`            $table->integer('${f.campo}')->nullable();`);
+    });
+    const cols = lines.join("\n");
     const extraCols =
       checklistType === "revisao-entrega" || checklistType === "inspecao-pre-entrega"
         ? "\n            $table->json('observacoes')->nullable();"
@@ -591,6 +653,10 @@ ${cols}${extraCols}
   const anthropicModels = AI_MODELS.filter((m) => m.provider === "anthropic");
   const canRun = !!pdfFile && images.length > 0 && !isProcessing;
   const hasPages = extractedPages.length > 1;
+  const isPlanoManutencao = checklistType === "plano-manutencao";
+  // No plano não existe migration: os campos são a coluna `campo` das perguntas e as
+  // propriedades lidas no PHP do PDF. Chamar a aba de "migration" ali confunde.
+  const rotuloCampos = isPlanoManutencao ? "Campos do Formulário" : "Campos de Migration";
 
   return (
     <div ref={containerRef} className="space-y-6">
@@ -741,7 +807,7 @@ ${cols}${extraCols}
               }`}
             >
               <Table2 className="w-4 h-4" />
-              Campos de Migration
+              {rotuloCampos}
               {migrationFields.length > 0 && (
                 <span className="ml-1 text-xs opacity-70">
                   ({migrationFields.length})
@@ -774,7 +840,7 @@ ${cols}${extraCols}
                 }`}
               >
                 <Database className="w-4 h-4" />
-                Perguntas por Status
+                {isPlanoManutencao ? "Perguntas por Página" : "Perguntas por Status"}
                 <span className="ml-1 text-xs opacity-70">({migrationFields.length})</span>
               </button>
             )}
@@ -840,13 +906,13 @@ ${cols}${extraCols}
             </div>
           )}
 
-          {/* Tab: Campos de Migration */}
+          {/* Tab: Campos (migration ou, no plano, campos do formulário) */}
           {activeTab === "fields" && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="font-semibold text-[#0BB783] flex items-center gap-2">
                   <Table2 className="w-4 h-4" />
-                  Campos de Migration
+                  {rotuloCampos}
                   <AirtonBadge />
                 </h3>
                 <div className="flex gap-2">
@@ -942,12 +1008,43 @@ ${cols}${extraCols}
                         <tr className="bg-[#F9F9F9] border-b border-[#e0e0e0]">
                           <th className="text-left px-4 py-3 text-[#0BB783] font-semibold w-52">campo</th>
                           <th className="text-left px-4 py-3 text-[#464E5F] font-semibold">pergunta</th>
-                          <th className="w-10" />
+                          <th
+                            className={`text-left px-2 py-3 text-[#80808F] font-medium text-xs ${
+                              isPlanoManutencao ? "w-40" : "w-10"
+                            }`}
+                          >
+                            {isPlanoManutencao ? "escala" : ""}
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
-                        {migrationFields.map((field, idx) => (
-                          <tr key={idx} className="border-b border-[#e8e8e8] hover:bg-[#FAFAFA] transition-colors">
+                        {migrationFields.map((field, idx) => {
+                          const modo: ModoKmTempo = isPlanoManutencao
+                            ? modoKmTempo(migrationFields, idx)
+                            : "nenhum";
+                          // A seção vem da IA junto com o campo. Repetir o título em cada
+                          // linha polui; ele entra uma vez, quando muda — é o que situa o
+                          // campo na folha ("VEÍCULO A MEIA ALTURA").
+                          const secao = (field.secao ?? "").trim();
+                          const secaoAnterior = (migrationFields[idx - 1]?.secao ?? "").trim();
+                          const abreSecao = !!secao && secao !== secaoAnterior;
+                          return (
+                          <Fragment key={idx}>
+                          {abreSecao && (
+                            <tr className="bg-[#22B9FF]/5 border-b border-[#22B9FF]/20">
+                              <td
+                                colSpan={3}
+                                className="px-4 py-1.5 text-[11px] font-bold uppercase tracking-wide text-[#22B9FF]"
+                              >
+                                {secao}
+                              </td>
+                            </tr>
+                          )}
+                          <tr
+                            className={`border-b border-[#e8e8e8] hover:bg-[#FAFAFA] transition-colors ${
+                              modo === "ambos" ? "bg-[#22B9FF]/5" : ""
+                            }`}
+                          >
                             <td className="px-3 py-2">
                               <input
                                 type="text"
@@ -972,7 +1069,28 @@ ${cols}${extraCols}
                                 className="w-full bg-white border border-[#d0d0d0] rounded px-2 py-1 text-xs text-[#464E5F] focus:outline-none focus:ring-1 focus:ring-[#0BB783]/40 transition-colors"
                               />
                             </td>
-                            <td className="px-2 py-2 text-center">
+                            <td className="px-2 py-2 text-center whitespace-nowrap">
+                              {isPlanoManutencao && (
+                                <select
+                                  value={modo}
+                                  onChange={(e) =>
+                                    setMigrationFields((prev) =>
+                                      aplicarModoKmTempo(prev, idx, e.target.value as ModoKmTempo)
+                                    )
+                                  }
+                                  className={`mr-1 rounded border px-1 py-1 text-[11px] font-medium transition-colors focus:outline-none focus:ring-1 focus:ring-[#22B9FF]/40 ${
+                                    modo === "nenhum"
+                                      ? "bg-white text-[#b0b0bf] border-[#e0e0e0]"
+                                      : "bg-[#22B9FF]/10 text-[#22B9FF] border-[#22B9FF]/40"
+                                  }`}
+                                  title="Escala do item na folha: só Km, só Tempo, ou os dois (aí vira dois campos)"
+                                >
+                                  <option value="nenhum">sem escala</option>
+                                  <option value="km">só Km</option>
+                                  <option value="tempo">só Tempo</option>
+                                  <option value="ambos">Km + Tempo</option>
+                                </select>
+                              )}
                               <button
                                 onClick={() =>
                                   setMigrationFields((prev) => prev.filter((_, i) => i !== idx))
@@ -984,7 +1102,9 @@ ${cols}${extraCols}
                               </button>
                             </td>
                           </tr>
-                        ))}
+                          </Fragment>
+                          );
+                        })}
                       </tbody>
                     </table>
                     <div className="px-3 py-2 bg-[#F9F9F9] border-t border-[#e0e0e0]">
@@ -1000,7 +1120,21 @@ ${cols}${extraCols}
                     </div>
                   </div>
 
-                  {/* Estrutura da Migration */}
+                  {/* Estrutura da Migration — o plano de manutenção não tem migration:
+                      os campos existem só como coluna `campo` das perguntas e como
+                      propriedade lida no PHP do PDF. */}
+                  {isPlanoManutencao ? (
+                    <div className="rounded-lg border border-[#e0e0e0] bg-[#F9F9F9] px-4 py-3">
+                      <p className="text-xs text-[#80808F] leading-relaxed">
+                        <strong className="text-[#464E5F]">Sem migration.</strong> No plano de
+                        manutenção os campos não viram colunas de tabela — eles são a coluna{" "}
+                        <code className="font-mono">campo</code> em{" "}
+                        <code className="font-mono">formulario_perguntas</code> e as propriedades que
+                        o PHP do PDF lê (<code className="font-mono">$resposta_formulario-&gt;campo</code>).
+                        O banco sai na aba <strong>Perguntas por Status</strong>.
+                      </p>
+                    </div>
+                  ) : (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-semibold text-[#464E5F] flex items-center gap-2">
@@ -1036,6 +1170,7 @@ ${cols}${extraCols}
                       {buildMigrationCode(migrationTableName, migrationFields)}
                     </pre>
                   </div>
+                  )}
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center gap-3 py-12 text-[#80808F]">
@@ -1238,6 +1373,13 @@ ${cols}${extraCols}
                           >
                             <Copy className="w-3 h-3" />
                           </button>
+                          <button
+                            onClick={() => handleDeleteGroup(idx)}
+                            className="p-1.5 rounded bg-[#F9F9F9] hover:bg-[#F64E60]/10 border border-[#e0e0e0] hover:border-[#F64E60]/30 text-[#80808F] hover:text-[#F64E60] transition-colors"
+                            title="Remover seção"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
                         </div>
                       </div>
                     );
@@ -1365,6 +1507,7 @@ ${cols}${extraCols}
               checklistId={checklistId}
               checklistType={checklistType ?? "roteiro-entrega-tecnica"}
               initialPerguntas={initialData?.perguntas}
+              initialPlano={initialData?.plano_manutencao}
               onPerguntasChange={handlePerguntasChange}
             />
           )}

@@ -78,8 +78,22 @@ const IPE_EXTRA_RULES = `
 - Use a letra da seção mais próxima acima do item para determinar o prefixo
 - NUNCA repita o mesmo nome de campo`;
 
+const PLANO_EXTRA_RULES = `
+- PLANO DE MANUTENÇÃO — ITENS COBRADOS POR KM E POR TEMPO: algumas operações têm duas
+  sub-linhas na folha, "Km" e "Meses"/"Tempo", cada uma com sua própria marcação. Para
+  esses itens gere DOIS campos, na ordem km primeiro e tempo depois:
+  "Fluido de freio" com sub-linhas Km e Meses → "fluido_de_freio_km" e "fluido_de_freio_tempo"
+- A pergunta de cada um repete o texto do item com o sufixo " (KM)" e " (Tempo)"
+- Itens com uma única linha continuam gerando UM campo só, sem sufixo`;
+
+function extraRules(checklistType?: string): string {
+  if (checklistType === "inspecao-pre-entrega") return IPE_EXTRA_RULES;
+  if (checklistType === "plano-manutencao") return PLANO_EXTRA_RULES;
+  return "";
+}
+
 function buildSystemPrompt(checklistType?: string): string {
-  const extra = checklistType === "inspecao-pre-entrega" ? IPE_EXTRA_RULES : "";
+  const extra = extraRules(checklistType);
   return BASE_PROMPT_BODY + extra + `
 
 FORMATO DE SAÍDA:
@@ -93,7 +107,7 @@ Retorne APENAS um JSON válido (array), sem explicações, sem markdown, sem có
 }
 
 function buildOpenAISystemPrompt(checklistType?: string): string {
-  const extra = checklistType === "inspecao-pre-entrega" ? IPE_EXTRA_RULES : "";
+  const extra = extraRules(checklistType);
   return BASE_PROMPT_BODY + extra + `
 
 FORMATO DE SAÍDA OBRIGATÓRIO:

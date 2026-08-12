@@ -1,8 +1,22 @@
 "use client";
 
-import { X } from "lucide-react";
-import { clamp01, syncGroupStartIfFirst } from "@/lib/designer/geometry";
-import type { DesignerGroup, DesignerPage, EditorState, Marker } from "@/lib/designer/types";
+import { useState } from "react";
+import { CornerLeftUp, CornerRightDown, X, Link2, AlertTriangle } from "lucide-react";
+import {
+  applyGroupAutomation,
+  clamp01,
+  pushMarkersBelow,
+  syncGroupStartIfFirst,
+} from "@/lib/designer/geometry";
+import { insertMirrorRow, mirrorTargetIndex, removeMirrorRow, supportsMirror } from "@/lib/designer/mirror";
+import { mascaraDoItem } from "@/lib/designer/manutencao";
+import type {
+  DesignerGroup,
+  DesignerPage,
+  EditorState,
+  ManutencaoConfig,
+  Marker,
+} from "@/lib/designer/types";
 
 interface Props {
   st: EditorState;
@@ -11,6 +25,32 @@ interface Props {
   marker: Marker;
   index: number;
   rerender: () => void;
+  /** Inserir/remover a linha de referência muda o Y das linhas abaixo — precisa do commit. */
+  commit: () => void;
+  /** manutenção: para o seletor de condição da linha. */
+  manutencaoCfg?: ManutencaoConfig | null;
+  /** Move deste item em diante para a folha seguinte, como "(cont.)". */
+  onSplitHere?: () => void;
+  /** false no 1º item: não faz sentido "partir" no começo do grupo. */
+  canSplit?: boolean;
+  /** Move só este item para o fim do grupo anterior. */
+  onMoveToPrevGroup?: () => void;
+  /** manutenção: abre a grade de revisões destacando este item. */
+  onAbrirGrade?: () => void;
+}
+
+// Passos (mm) dos campos X/Y da linha. O antigo 0,01 do step nativo era fino demais:
+// um clique na setinha não movia nada visível na folha. A calibração fina continua
+// existindo, mas por modificador.
+const PASSO_SETA = 0.1;
+const PASSO_GROSSO = 1;
+const PASSO_FINO = 0.01;
+
+/** Deslocamento (mm) que a tecla pede, ou null quando não é seta de cima/baixo. */
+function passoDaSeta(e: React.KeyboardEvent<HTMLInputElement>): number | null {
+  if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return null;
+  const passo = e.shiftKey ? PASSO_GROSSO : e.altKey ? PASSO_FINO : PASSO_SETA;
+  return e.key === "ArrowUp" ? passo : -passo;
 }
 
 function toggleColor(active: boolean, kind: "ok" | "no" | "na"): string {
@@ -20,11 +60,37 @@ function toggleColor(active: boolean, kind: "ok" | "no" | "na"): string {
   return "bg-[#22B9FF] text-white border-[#22B9FF]";
 }
 
-export function MarkerRow({ st, page, group, marker: m, index, rerender }: Props) {
+export function MarkerRow({
+  st,
+  page,
+  group,
+  marker: m,
+  index,
+  rerender,
+  commit,
+  manutencaoCfg,
+  onSplitHere,
+  canSplit,
+  onMoveToPrevGroup,
+  onAbrirGrade,
+}: Props) {
   const selected = m.id === st.selectedMarkerId;
   const isRevisao = group.docType === "revisao";
   const isPosvenda = group.docType === "posvenda";
-  const showX = !isRevisao && !(isPosvenda && group.posvendaXMode === "diff");
+  const isManutencao = group.docType === "manutencao";
+  // Manutenção não tem X próprio: o X é o da revisão impressa.
+  const showX = !isRevisao && !isManutencao && !(isPosvenda && group.posvendaXMode === "diff");
+  /** Mexer no Y deste item arrasta os de baixo junto (desligável na folha). */
+  const empurra = page.pushBelow !== false && index < group.markers.length - 1;
+  /** Quantas revisões imprimem este item, de quantas existem. */
+  const revisoesDoItem = isManutencao ? mascaraDoItem(manutencaoCfg ?? null, m).length : 0;
+  const totalRevisoes = manutencaoCfg?.colunas.length ?? 0;
+  const revisoesCompletas = totalRevisoes > 0 && revisoesDoItem >= totalRevisoes;
+  // Enquanto o campo está sob digitação, quem manda é o texto cru; fora disso o valor
+  // vem do modelo. É o que deixa as linhas de baixo se atualizarem ao vivo quando o
+  // item de cima é empurrado, sem atrapalhar quem está digitando.
+  const [xRaw, setXRaw] = useState<string | null>(null);
+  const [yRaw, setYRaw] = useState<string | null>(null);
 
   function select() {
     st.selectedGroupId = group.id;
@@ -32,23 +98,75 @@ export function MarkerRow({ st, page, group, marker: m, index, rerender }: Props
     rerender();
   }
 
+  function aplicarX(mm: number) {
+    m.fx = clamp01(mm / page.widthMm);
+    syncGroupStartIfFirst(group, page, m);
+    rerender();
+  }
+
+  function aplicarY(mm: number) {
+    const antes = m.fy * page.heightMm;
+    m.fy = clamp01(mm / page.heightMm);
+    // O item que se ajusta no meio do grupo (um subtítulo, um par KM/Tempo) leva os de
+    // baixo junto: o que muda é onde o bloco começa, não o espaço entre eles.
+    if (empurra) pushMarkersBelow(group, page, index, mm - antes);
+    syncGroupStartIfFirst(group, page, m);
+    applyGroupAutomation(page);
+    rerender();
+  }
+
+  function clearSelection() {
+    if (st.selectedMarkerId !== m.id) return;
+    st.selectedMarkerId = null;
+    st.selectedGroupId = null;
+  }
+
   function del() {
-    group.markers = group.markers.filter((x) => x.id !== m.id);
-    if (st.selectedMarkerId === m.id) {
-      st.selectedMarkerId = null;
-      st.selectedGroupId = null;
+    // Linha de referência é posição extra: ao sair, o que está abaixo volta a subir.
+    if (m.mirrorNext && removeMirrorRow(group, page, index)) {
+      clearSelection();
+      applyGroupAutomation(page);
+      commit();
+      return;
     }
+    group.markers = group.markers.filter((x) => x.id !== m.id);
+    clearSelection();
     rerender();
   }
 
   const opts = group.posvendaOpts || [];
+
+  // Rótulo de referência (só roteiro): marcação extra na linha do rótulo, que imprime a
+  // marcação do item seguinte.
+  const canMirror = supportsMirror(group);
+  const isMirror = canMirror && !!m.mirrorNext;
+  const targetIdx = isMirror ? mirrorTargetIndex(group.markers, index) : -1;
+  const targetLabel = targetIdx >= 0 ? group.markers[targetIdx].label : null;
+
+  function addMirror() {
+    const row = insertMirrorRow(group, page, index);
+    if (!row) return;
+    st.selectedGroupId = group.id;
+    st.selectedMarkerId = row.id;
+    // O rótulo ocupa uma linha da folha: com chainY ligado, os grupos seguintes descem
+    // um incremento junto. Grupo arrastado à mão (yManual) fica onde está.
+    applyGroupAutomation(page);
+    commit();
+  }
+
+  function dropMirror() {
+    if (!removeMirrorRow(group, page, index)) return;
+    clearSelection();
+    applyGroupAutomation(page);
+    commit();
+  }
 
   return (
     <div
       onClick={(e) => {
         if (e.target === e.currentTarget) select();
       }}
-      className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border ${
+      className={`flex flex-wrap items-center gap-1.5 px-2 py-1.5 rounded-lg border ${
         selected ? "bg-[#173872]/5 border-[#173872]/30" : "border-transparent hover:bg-[#F9F9F9]"
       }`}
     >
@@ -56,9 +174,36 @@ export function MarkerRow({ st, page, group, marker: m, index, rerender }: Props
         {index + 1}
       </span>
 
-      {/* type toggle */}
+      {/* type toggle — escondido na linha de referência: ela não tem resposta própria,
+          o preview desenha o tipo do item seguinte */}
+      {!isMirror && (
       <div className="flex shrink-0 border border-[#e0e0e0] rounded overflow-hidden">
-        {isRevisao ? (
+        {isManutencao ? (
+          (
+            [
+              ["1", "●", "bola verde", "bg-[#0BB783] text-white border-[#0BB783]"],
+              ["2", "▲", "triângulo amarelo", "bg-[#FFB822] text-white border-[#FFB822]"],
+              ["3", "✕", "X vermelho", "bg-[#F64E60] text-white border-[#F64E60]"],
+            ] as [string, string, string, string][]
+          ).map(([val, glyph, titulo, onClass]) => {
+            const active = (m.type || "1") === val;
+            return (
+              <button
+                key={val}
+                onClick={() => {
+                  m.type = val;
+                  select();
+                }}
+                title={titulo}
+                className={`px-1.5 py-1 text-[9px] font-mono border-r last:border-r-0 border-[#e0e0e0] ${
+                  active ? onClass : "bg-white text-[#b0b0bf] hover:text-[#80808F]"
+                }`}
+              >
+                {glyph}
+              </button>
+            );
+          })
+        ) : isRevisao ? (
           (
             [
               ["1", "✓", "ok"],
@@ -122,50 +267,179 @@ export function MarkerRow({ st, page, group, marker: m, index, rerender }: Props
           })
         )}
       </div>
+      )}
 
-      <input
-        defaultValue={m.label}
-        key={m.id}
-        onFocus={select}
-        onChange={(e) => {
-          m.label = e.target.value;
-        }}
-        className="flex-1 min-w-0 bg-white border border-[#d0d0d0] rounded px-1.5 py-1 text-xs font-mono text-[#0BB783] focus:outline-none focus:ring-1 focus:ring-[#0BB783]/40"
-        placeholder="nome_do_campo"
-      />
+      {canMirror && (
+        <button
+          onClick={isMirror ? dropMirror : addMirror}
+          title={
+            isMirror
+              ? targetLabel
+                ? `Linha de referência: imprime a marcação de "${targetLabel}". Clique para remover — os itens abaixo sobem um incremento.`
+                : "Linha de referência sem item seguinte — nada a espelhar. Clique para remover."
+              : `Inserir linha de referência acima (rótulo tipo "1. MÓDULO ADAS:"): cria uma marcação extra na linha ${index + 1} e empurra este item e os de baixo um incremento`
+          }
+          className={`shrink-0 p-1 rounded border transition-colors ${
+            isMirror
+              ? targetLabel
+                ? "bg-[#8950FC] text-white border-[#8950FC]"
+                : "bg-[#FFB822] text-white border-[#FFB822]"
+              : "bg-white text-[#d5d5dd] border-[#e0e0e0] hover:text-[#8950FC] hover:border-[#8950FC]/40"
+          }`}
+        >
+          <Link2 className="w-3 h-3" />
+        </button>
+      )}
+
+      {isMirror ? (
+        // Campo somente leitura: quem manda é o item seguinte. Editar aqui não teria
+        // efeito no código gerado (resolveMarkerFields sempre usa o campo do alvo).
+        <input
+          value={targetLabel ?? m.label}
+          readOnly
+          onFocus={select}
+          title="Campo do item seguinte — esta linha imprime a marcação dele. Para renomear, edite o item abaixo."
+          className="flex-1 min-w-0 bg-[#8950FC]/5 border border-[#8950FC]/40 rounded px-1.5 py-1 text-xs font-mono text-[#8950FC] cursor-default focus:outline-none"
+        />
+      ) : (
+        <input
+          defaultValue={m.label}
+          key={m.id}
+          onFocus={select}
+          onChange={(e) => {
+            m.label = e.target.value;
+          }}
+          className="flex-1 min-w-0 bg-white border border-[#d0d0d0] rounded px-1.5 py-1 text-xs font-mono text-[#0BB783] focus:outline-none focus:ring-1 focus:ring-[#0BB783]/40"
+          placeholder="nome_do_campo"
+        />
+      )}
+
+      {isManutencao && manutencaoCfg && (
+        // Quantas revisões imprimem este item. O detalhe (quais) é da grade — aqui só
+        // cabe o resumo e o atalho para abri-la já nesta linha.
+        <button
+          onClick={() => {
+            select();
+            onAbrirGrade?.();
+          }}
+          title={
+            revisoesDoItem === 0
+              ? "Nenhuma revisão marcada — este item não será impresso. Clique para abrir a grade."
+              : revisoesCompletas
+              ? "Impresso em todas as revisões — clique para abrir a grade"
+              : `Impresso em ${revisoesDoItem} de ${totalRevisoes} revisões — clique para abrir a grade`
+          }
+          className={`shrink-0 px-1.5 py-1 rounded border text-[10px] font-mono transition-colors ${
+            revisoesDoItem === 0
+              ? "border-[#F64E60]/40 bg-[#F64E60]/5 text-[#F64E60]"
+              : revisoesCompletas
+              ? "border-[#e0e0e0] bg-white text-[#80808F] hover:border-[#173872]/40 hover:text-[#173872]"
+              : "border-[#173872]/40 bg-[#173872]/5 text-[#173872]"
+          }`}
+        >
+          {`${revisoesDoItem}/${totalRevisoes}`}
+        </button>
+      )}
 
       {showX && (
         <input
           type="number"
-          step="0.01"
-          defaultValue={((m.fx ?? 0) * page.widthMm).toFixed(2)}
-          key={m.id + "x" + ((m.fx ?? 0) * page.widthMm).toFixed(2)}
-          title="x (mm)"
+          step={PASSO_SETA}
+          value={xRaw ?? ((m.fx ?? 0) * page.widthMm).toFixed(2)}
+          title={`x (mm) — seta ${PASSO_SETA}, Shift ${PASSO_GROSSO}, Alt ${PASSO_FINO}`}
           onChange={(e) => {
-            m.fx = clamp01((parseFloat(e.target.value) || 0) / page.widthMm);
-            syncGroupStartIfFirst(group, page, m);
-            rerender();
+            setXRaw(e.target.value);
+            const mm = parseFloat(e.target.value);
+            if (isNaN(mm)) return;
+            aplicarX(mm);
+          }}
+          onKeyDown={(e) => {
+            const passo = passoDaSeta(e);
+            if (passo === null) return;
+            e.preventDefault();
+            const mm = +((m.fx ?? 0) * page.widthMm + passo).toFixed(2);
+            setXRaw(mm.toFixed(2));
+            aplicarX(mm);
+          }}
+          onBlur={() => {
+            setXRaw(null);
+            commit();
           }}
           className="w-12 bg-white border border-[#d0d0d0] rounded px-1 py-1 text-[10px] font-mono text-right text-[#80808F] focus:outline-none"
         />
       )}
       <input
         type="number"
-        step="0.01"
-        defaultValue={(m.fy * page.heightMm).toFixed(2)}
-        key={m.id + "y" + (m.fy * page.heightMm).toFixed(2)}
-        title="y (mm)"
+        step={PASSO_SETA}
+        value={yRaw ?? (m.fy * page.heightMm).toFixed(2)}
+        title={
+          (empurra
+            ? "y (mm) — os itens abaixo deste, no mesmo grupo, andam junto"
+            : "y (mm) — move só este item") +
+          `\nseta ${PASSO_SETA} mm · Shift ${PASSO_GROSSO} mm · Alt ${PASSO_FINO} mm`
+        }
         onChange={(e) => {
-          m.fy = clamp01((parseFloat(e.target.value) || 0) / page.heightMm);
-          syncGroupStartIfFirst(group, page, m);
-          rerender();
+          setYRaw(e.target.value);
+          const mm = parseFloat(e.target.value);
+          if (isNaN(mm)) return; // campo em branco no meio da digitação
+          aplicarY(mm);
+        }}
+        onKeyDown={(e) => {
+          const passo = passoDaSeta(e);
+          if (passo === null) return;
+          // Assume as setas: o step nativo é único, e aqui um toque precisa render 0,1 mm
+          // sem tirar o ajuste de 0,01 de quem está caçando o alinhamento fino.
+          e.preventDefault();
+          const mm = +(m.fy * page.heightMm + passo).toFixed(2);
+          setYRaw(mm.toFixed(2));
+          aplicarY(mm);
+        }}
+        onBlur={() => {
+          setYRaw(null);
+          commit();
         }}
         className="w-12 bg-white border border-[#d0d0d0] rounded px-1 py-1 text-[10px] font-mono text-right text-[#80808F] focus:outline-none"
       />
 
+      {onMoveToPrevGroup && (
+        <button
+          onClick={onMoveToPrevGroup}
+          className="shrink-0 p-1 text-[#d5d5dd] hover:text-[#173872] transition-colors"
+          title={`Mover só este item (${index + 1}) para o fim do grupo anterior`}
+        >
+          <CornerLeftUp className="w-3 h-3" />
+        </button>
+      )}
+
+      {onSplitHere && canSplit && (
+        <button
+          onClick={onSplitHere}
+          className="shrink-0 p-1 text-[#d5d5dd] hover:text-[#173872] transition-colors"
+          title={`Mover deste item (${index + 1}) até o último para a folha seguinte, com o mesmo nome + (cont.)`}
+        >
+          <CornerRightDown className="w-3 h-3" />
+        </button>
+      )}
+
       <button onClick={del} className="shrink-0 p-1 text-[#b0b0bf] hover:text-[#F64E60] transition-colors" title="Remover">
         <X className="w-3 h-3" />
       </button>
+
+      {isMirror && (
+        <div className="w-full pl-6 -mt-0.5">
+          {targetLabel ? (
+            <span className="text-[10.5px] text-[#8950FC] flex items-center gap-1">
+              ↳ imprime a marcação de
+              <code className="font-mono bg-[#8950FC]/10 rounded px-1">{targetLabel}</code>
+            </span>
+          ) : (
+            <span className="text-[10.5px] text-[#FFB822] flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3 shrink-0" />
+              sem item seguinte neste grupo — segue imprimindo o próprio campo
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

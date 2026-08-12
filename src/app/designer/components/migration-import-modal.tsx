@@ -3,18 +3,33 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { parseMigrationGroups } from "@/lib/designer/migration-parse";
+import { planPagedImport, resolveImportStartPage } from "@/lib/designer/actions";
+import { PagingControls, defaultPagingValue, isPagingValid, type PagingValue } from "./paging-controls";
+import type { DesignerPage } from "@/lib/designer/types";
 
 interface Props {
+  pages: DesignerPage[];
+  page: DesignerPage;
   onClose: () => void;
-  onImport: (raw: string, generate: boolean) => boolean;
+  onImport: (raw: string, generate: boolean, paging: PagingValue | null, replaceExisting: boolean) => boolean;
 }
 
-export function MigrationImportModal({ onClose, onImport }: Props) {
+export function MigrationImportModal({ pages, page, onClose, onImport }: Props) {
   const [text, setText] = useState("");
   const [generate, setGenerate] = useState(true);
+  const [paged, setPaged] = useState(true);
+  const [replaceExisting, setReplaceExisting] = useState(true);
+  const [paging, setPaging] = useState<PagingValue>(() => defaultPagingValue(page, pages));
 
   const blocks = parseMigrationGroups(text);
   const total = blocks.reduce((s, b) => s + b.names.length, 0);
+  const pagingOk = !paged || isPagingValid(paging);
+  const basePage = resolveImportStartPage(pages, page, replaceExisting);
+  const plan =
+    paged && pagingOk && blocks.length ? planPagedImport(basePage, text, { ...paging, replaceExisting }) : null;
+  const existingGroups = pages
+    .filter((p) => p.kind === "checklist" && p.docType === page.docType)
+    .reduce((a, p) => a + p.groups.filter((g) => g.markers.length > 0).length, 0);
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-6" onClick={onClose}>
@@ -63,6 +78,33 @@ export function MigrationImportModal({ onClose, onImport }: Props) {
               </>
             )}
           </p>
+
+          <div className="mt-3">
+            <PagingControls
+              enabled={paged}
+              onEnabledChange={setPaged}
+              value={paging}
+              onChange={setPaging}
+              preview={
+                plan
+                  ? {
+                      pages: plan.sheets.length,
+                      split: plan.splitCount,
+                      sheets: plan.sheets.map((s) => ({
+                        groups: s.length,
+                        items: s.reduce((a, g) => a + g.names.length, 0),
+                        endY: s.length
+                          ? s[s.length - 1].yStart + (s[s.length - 1].names.length - 1) * plan.increment
+                          : 0,
+                      })),
+                    }
+                  : null
+              }
+              replaceExisting={replaceExisting}
+              onReplaceExistingChange={setReplaceExisting}
+              existingGroups={existingGroups}
+            />
+          </div>
         </div>
 
         <div className="flex items-center gap-2 px-5 py-4 border-t border-[#e8e8e8]">
@@ -77,10 +119,12 @@ export function MigrationImportModal({ onClose, onImport }: Props) {
             Cancelar
           </button>
           <button
+            disabled={!pagingOk}
             onClick={() => {
-              if (onImport(text, generate)) onClose();
+              if (onImport(text, generate, paged ? paging : null, replaceExisting)) onClose();
             }}
-            className="px-4 py-1.5 rounded-lg bg-[#173872] hover:bg-[#122d5e] text-white text-sm font-medium"
+            className="px-4 py-1.5 rounded-lg bg-[#173872] hover:bg-[#122d5e] text-white text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[#173872]"
+            title={pagingOk ? undefined : "Ajuste a área útil da folha antes de importar"}
           >
             Importar
           </button>
