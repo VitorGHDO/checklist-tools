@@ -21,6 +21,7 @@ import {
   planoConfigPadrao,
   type PlanoManutencaoConfig,
 } from "@/lib/extrator/plano-manutencao";
+import { linhasComContagemErrada, paraMysql } from "@/lib/extrator/formato-db";
 
 interface WorkingGroup {
   id: string;
@@ -32,6 +33,8 @@ interface Props {
   groups: WorkingGroup[];
   fields: MigrationField[];
   checklistId: string;
+  /** Edita o mesmo id que a aba Status / Seções usa — os dois escrevem no rascunho. */
+  onChecklistIdChange?: (id: string) => void;
   checklistType: ChecklistType;
   initialPerguntas?: PerguntaAssociada[];
   /** Plano de manutenção: config salva no rascunho (revisões, formulario, botão). */
@@ -125,24 +128,25 @@ function makeDefaults(
     };
   }
   if (checklistType === "plano-manutencao") {
-    // Os três status do plano são os símbolos impressos no PDF: bola, triângulo e X.
-    // O PHP do desenho compara o valor com 1, 2 e 3 — mudar esses valores quebra o
-    // casamento com o $drawIcon do Designer.
+    // Duas respostas, e os valores são os símbolos impressos no PDF: 1 = ✓, 3 = X. O 2
+    // (triângulo) existe no desenho mas não é oferecido no formulário — por isso
+    // "Substituir" fica com o 3, e não com o 2: mudar o valor trocaria o símbolo
+    // impresso e desalinharia as respostas já gravadas.
     return {
       id: idSuffix,
       campo,
       pergunta,
       statusIdx,
       tipo: "radio",
-      opcoes: "OK;Ajustar;Substituir",
-      valor: "1;2;3",
+      opcoes: "OK;Substituir",
+      valor: "1;3",
       obrigatorio: 1,
       defaultVal: null,
       query: "",
       ordem,
       tamanho: "col-12",
       selecione: "",
-      classCor: "green;yellow;red",
+      classCor: "green;red",
       grupo,
       ordemGrupo,
       titulo,
@@ -1120,6 +1124,7 @@ export function PerguntasStatusTab({
   groups,
   fields,
   checklistId,
+  onChecklistIdChange,
   checklistType,
   initialPerguntas,
   initialPlano,
@@ -1140,6 +1145,7 @@ export function PerguntasStatusTab({
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [showDb, setShowDb] = useState(false);
   const [dbOutput, setDbOutput] = useState("");
+  const [dbFormato, setDbFormato] = useState<"planilha" | "mysql">("planilha");
   const [showSql, setShowSql] = useState(false);
   const [sqlOutput, setSqlOutput] = useState("");
 
@@ -1194,6 +1200,35 @@ export function PerguntasStatusTab({
     setSqlOutput("");
     showToast("Associação reiniciada!", "success");
   }, [groups, fields, checklistType, ordemGrupoBase]);
+
+  /**
+   * As linhas do banco. "planilha" é o formato de colar na grade do DBeaver (TAB e aspas
+   * duplas); "mysql" são as MESMAS colunas na escrita do INSERT — mais uma 1ª coluna
+   * vazia para o id auto_increment.
+   */
+  function gerarDb(formato: "planilha" | "mysql") {
+    const planilha = isPlano
+      ? buildPlanoDbRows(perguntas, planoEfetivo())
+      : checklistType === "revisao-entrega"
+      ? buildRevisaoEntregaDbRows(perguntas, checklistId, groups)
+      : checklistType === "inspecao-pre-entrega"
+      ? buildInspecaoPreEntregaDbRows(perguntas, checklistId, groups)
+      : buildDbRows(perguntas, checklistId);
+    if (formato === "mysql") {
+      // O INSERT é posicional: uma linha com coluna a mais ou a menos só estoura no
+      // banco, e aí achar a pergunta culpada no meio de centenas é o trabalho chato.
+      const fora = linhasComContagemErrada(planilha);
+      if (fora.length) {
+        showToast(
+          `Linha(s) ${fora.slice(0, 5).join(", ")}${fora.length > 5 ? "…" : ""} com número de colunas fora do padrão — confira antes de rodar o INSERT.`,
+          "error",
+        );
+      }
+    }
+    setDbOutput(formato === "mysql" ? paraMysql(planilha) : planilha);
+    setDbFormato(formato);
+    setShowDb(true);
+  }
 
   function update(id: string, patch: Partial<PerguntaAssociada>) {
     setPerguntas((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
@@ -1494,7 +1529,22 @@ export function PerguntasStatusTab({
             </span>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {!isPlano && (
+            // A 2ª coluna de toda linha gerada aqui. Ficava só na aba Status / Seções, o
+            // que obrigava a trocar de aba antes de gerar o banco.
+            <label className="flex items-center gap-1.5 text-xs text-[#80808F]">
+              checklist
+              <input
+                value={checklistId}
+                onChange={(e) => onChecklistIdChange?.(e.target.value.replace(/[^0-9]/g, ""))}
+                inputMode="numeric"
+                placeholder="217"
+                title="Código do checklist — vai na coluna `checklist` de cada pergunta"
+                className="w-20 bg-white border border-[#d0d0d0] rounded-lg px-2 py-1 text-sm text-center text-[#464E5F] focus:outline-none focus:ring-2 focus:ring-[#22B9FF]/40 transition-colors"
+              />
+            </label>
+          )}
           <button
             onClick={resetAssociation}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F9F9F9] hover:bg-[#e8e8e8] border border-[#e0e0e0] text-[#464E5F] text-sm transition-colors"
@@ -1503,23 +1553,22 @@ export function PerguntasStatusTab({
             Resetar
           </button>
           <button
-            onClick={() => {
-              setDbOutput(
-                isPlano
-                  ? buildPlanoDbRows(perguntas, planoEfetivo())
-                  : checklistType === "revisao-entrega"
-                  ? buildRevisaoEntregaDbRows(perguntas, checklistId, groups)
-                  : checklistType === "inspecao-pre-entrega"
-                  ? buildInspecaoPreEntregaDbRows(perguntas, checklistId, groups)
-                  : buildDbRows(perguntas, checklistId),
-              );
-              setShowDb(true);
-            }}
+            onClick={() => gerarDb("planilha")}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#22B9FF]/10 hover:bg-[#22B9FF]/20 text-[#22B9FF] text-sm font-medium transition-colors border border-[#22B9FF]/30"
           >
             <Copy className="w-3.5 h-3.5" />
             Formato DB
           </button>
+          {!isPlano && (
+            <button
+              onClick={() => gerarDb("mysql")}
+              title="As mesmas colunas, na escrita do MySQL: aspas simples, NULL sem aspas e ? no blob"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0BB783]/10 hover:bg-[#0BB783]/20 text-[#0BB783] text-sm font-medium transition-colors border border-[#0BB783]/30"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              Formato MySQL
+            </button>
+          )}
           <button
             onClick={generateSql}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#8950FC]/10 hover:bg-[#8950FC]/20 text-[#8950FC] text-sm font-medium transition-colors border border-[#8950FC]/30"
@@ -1592,14 +1641,23 @@ export function PerguntasStatusTab({
       {showDb && dbOutput && (
         <div className="space-y-2 pt-3 border-t border-[#e8e8e8]">
           <div className="flex items-center justify-between">
-            <h4 className="text-sm font-semibold text-[#22B9FF]">
-              Formato DB (checklist_perguntas)
+            <h4
+              className={`text-sm font-semibold ${
+                dbFormato === "mysql" ? "text-[#0BB783]" : "text-[#22B9FF]"
+              }`}
+            >
+              {dbFormato === "mysql"
+                ? "Formato MySQL (checklist_perguntas) — id vazio na 1ª coluna"
+                : "Formato DB (checklist_perguntas)"}
             </h4>
             <div className="flex gap-2">
               <button
                 onClick={() => {
                   navigator.clipboard.writeText(dbOutput);
-                  showToast("Formato DB copiado!", "success");
+                  showToast(
+                    dbFormato === "mysql" ? "Formato MySQL copiado!" : "Formato DB copiado!",
+                    "success",
+                  );
                 }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#22B9FF]/10 hover:bg-[#22B9FF]/20 text-[#22B9FF] text-sm transition-colors"
               >

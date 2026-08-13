@@ -61,7 +61,7 @@ export function drawPosvendaDiffGroupMarkers(
       ctx.strokeStyle = color;
       ctx.globalAlpha = active ? 1 : 0.55;
       ctx.lineWidth = Math.max(active ? 2.4 : 1.4, cv.width * (active ? 0.0026 : 0.0016));
-      ctx.strokeRect(xpx - wPx / 2, y - hPx / 2, wPx, hPx);
+      if (!page.hideMarkBox) ctx.strokeRect(xpx - wPx / 2, y - hPx / 2, wPx, hPx);
       ctx.restore();
       if (active && isSel) {
         ctx.save();
@@ -156,7 +156,7 @@ export function drawPosvendaSameGroupMarkers(
     ctx.save();
     ctx.strokeStyle = color;
     ctx.lineWidth = Math.max(2.4, cv.width * 0.0026);
-    ctx.strokeRect(x - wPx / 2, y - hPx / 2, wPx, hPx);
+    if (!page.hideMarkBox) ctx.strokeRect(x - wPx / 2, y - hPx / 2, wPx, hPx);
     if (isSel) {
       ctx.strokeStyle = "rgba(242,169,74,0.85)";
       ctx.lineWidth = Math.max(1, cv.width * 0.0013);

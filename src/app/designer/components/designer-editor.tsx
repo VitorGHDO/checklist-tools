@@ -1033,6 +1033,26 @@ export default function DesignerEditor() {
                 />
               )}
 
+              {page?.kind === "checklist" && (
+                <label className="flex items-center gap-2 text-[11px] text-[#464E5F] cursor-pointer border border-[#e0e0e0] rounded-lg p-2.5 bg-[#F9F9F9]">
+                  <input
+                    type="checkbox"
+                    defaultChecked={!page.hideMarkBox}
+                    key={page.id + "mb" + st.geomTick}
+                    onChange={(e) => {
+                      // Vale para todas as folhas do tipo: conferir o símbolo contra o
+                      // fundo folha a folha não teria graça.
+                      const esconder = !e.target.checked;
+                      st.pages.forEach((p) => {
+                        if (p.kind === "checklist" && p.docType === st.docType) p.hideMarkBox = esconder;
+                      });
+                      commit();
+                    }}
+                  />
+                  contorno em volta das marcações (todas as folhas deste tipo)
+                </label>
+              )}
+
               {showAutomation && (
                 <div className="border border-[#e0e0e0] rounded-lg p-2.5 space-y-1.5 bg-[#F9F9F9]">
                   <div className="text-[10px] uppercase tracking-wide text-[#80808F] font-semibold">Automação entre grupos</div>

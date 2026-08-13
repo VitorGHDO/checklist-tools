@@ -84,7 +84,10 @@ const PLANO_EXTRA_RULES = `
   esses itens gere DOIS campos, na ordem km primeiro e tempo depois:
   "Fluido de freio" com sub-linhas Km e Meses → "fluido_de_freio_km" e "fluido_de_freio_tempo"
 - A pergunta de cada um repete o texto do item com o sufixo " (KM)" e " (Tempo)"
-- Itens com uma única linha continuam gerando UM campo só, sem sufixo`;
+- Itens com uma única linha continuam gerando UM campo só, sem sufixo
+- IGNORE por completo o bloco "NOTAS" do rodapé da folha e tudo que vem depois dele: são
+  observações do plano ("(1) Itens que devem ser substituídos...", "(2) Para veículos..."),
+  não itens do checklist. Não gere campo nem seção para nada desse bloco.`;
 
 function extraRules(checklistType?: string): string {
   if (checklistType === "inspecao-pre-entrega") return IPE_EXTRA_RULES;

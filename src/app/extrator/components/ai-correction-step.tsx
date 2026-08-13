@@ -25,6 +25,7 @@ import { getApiKey as getProviderApiKey } from "@/lib/api-keys";
 import {
   aplicarModoKmTempo,
   modoKmTempo,
+  secaoIgnorada,
   type ModoKmTempo,
   type PlanoManutencaoConfig,
 } from "@/lib/extrator/plano-manutencao";
@@ -141,14 +142,25 @@ export function AiCorrectionStep({
         });
         const data = await res.json();
         if (data.success && Array.isArray(data.fields)) {
-          setMigrationFields(data.fields);
+          // A IA pode gerar campo para as notas de rodapé mesmo instruída a pular: o
+          // descarte por seção é o que garante que nenhum vire pergunta.
+          const campos: MigrationField[] = (data.fields as MigrationField[]).filter(
+            (f) => !(checklistType === "plano-manutencao" && secaoIgnorada(f.secao)),
+          );
+          const descartados = data.fields.length - campos.length;
+          setMigrationFields(campos);
           if (data.truncated) {
             showToast(
-              `Resposta truncada: ${data.fields.length} campos gerados, mas alguns itens podem ter ficado de fora. Gere novamente ou divida o checklist.`,
+              `Resposta truncada: ${campos.length} campos gerados, mas alguns itens podem ter ficado de fora. Gere novamente ou divida o checklist.`,
               "error",
             );
           } else {
-            showToast(`Airton gerou ${data.fields.length} campos!`, "success");
+            showToast(
+              descartados > 0
+                ? `Airton gerou ${campos.length} campos (${descartados} do bloco NOTAS foram descartados).`
+                : `Airton gerou ${campos.length} campos!`,
+              "success",
+            );
           }
         } else {
           console.error("[generate-fields] Erro da API:", data.error);
@@ -311,6 +323,12 @@ export function AiCorrectionStep({
       }
     }
     if (current) sections.push(current);
+
+    // O rodapé de observações do plano casa com a heurística de cabeçalho (é ALL-CAPS) e
+    // arrastaria as notas junto como itens. Fora daqui ele não some sozinho: as linhas
+    // continuam no texto corrigido, só não viram grupo nem campo.
+    const uteis = isPlano ? sections.filter((s) => !secaoIgnorada(s.name)) : sections;
+    if (uteis.length !== sections.length) return uteis;
 
     // Sem nenhum cabeçalho reconhecido o fluxo travava: a aba do banco só aparece
     // com grupos, e sem grupos não havia como criar nenhum. Um grupo único com tudo
@@ -1505,6 +1523,7 @@ ${cols}${extraCols}
               groups={workingGroups}
               fields={migrationFields}
               checklistId={checklistId}
+              onChecklistIdChange={setChecklistId}
               checklistType={checklistType ?? "roteiro-entrega-tecnica"}
               initialPerguntas={initialData?.perguntas}
               initialPlano={initialData?.plano_manutencao}

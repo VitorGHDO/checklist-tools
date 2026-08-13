@@ -1,24 +1,40 @@
 // Desenho das marcações do docType "manutencao".
 //
-// Diferença essencial para os outros: o X vem da revisão selecionada (a coluna), não
-// do marcador; e o TCPDF imprime a marcação com `$pdf->Image($img, $x, $y, 3, 3)`, que
-// ancora a imagem pelo canto SUPERIOR ESQUERDO. Por isso o marcador é desenhado como
-// um quadrado de `iconMm` começando em (colunaX, markerY) — é o que sai na folha.
+// Diferença essencial para os outros: o X vem da revisão selecionada (a coluna), não do
+// marcador; e o TCPDF escreve o glifo com `writeHTMLCell(..., $largura_itens, $y, ...)`,
+// que ancora pelo canto SUPERIOR ESQUERDO. Por isso a marcação é desenhada dentro de uma
+// caixa de `iconMm` começando em (colunaX, markerY) — é onde o símbolo cai na folha.
+//
+// Os símbolos são os mesmos do PDF: ✓ (resposta 1) e X (resposta 3).
 
 import { colunaPreview, colunasVisiveis, itemNaColuna } from "../manutencao";
 import type { DesignerGroup, DesignerPage, ManutencaoConfig } from "../types";
 
-const COR_BOLA = "#0BB783";
+const COR_CHECK = "#0BB783";
 const COR_TRIANGULO = "#FFB822";
 const COR_X = "#F64E60";
+/** Tinta do glifo no canvas: o PDF imprime em preto, e a prévia segue a folha. */
+const COR_GLIFO = "#111318";
 
+/** Cor de apoio do tipo — usada no marcador de índice, não no glifo. */
 export function corDoTipo(type: string | undefined): string {
   if (type === "2") return COR_TRIANGULO;
   if (type === "3") return COR_X;
-  return COR_BOLA;
+  return COR_CHECK;
 }
 
-function desenharIcone(
+/** O mesmo símbolo que o PHP escreve: ✓ para 1, X para 3 (▲ sobrou de planos antigos). */
+function glifoDoTipo(type: string | undefined): string {
+  if (type === "3") return "✕";
+  if (type === "2") return "▲";
+  return "✓";
+}
+
+/**
+ * Desenha a marcação como o PDF a imprime — glifo, não ícone. O halo branco por baixo é
+ * o que mantém o símbolo legível quando ele cai em cima de uma linha da tabela.
+ */
+function desenharGlifo(
   ctx: CanvasRenderingContext2D,
   type: string,
   x: number,
@@ -28,33 +44,18 @@ function desenharIcone(
 ): void {
   const cx = x + w / 2;
   const cy = y + h / 2;
+  const corpo = Math.min(w, h);
   ctx.save();
-  ctx.lineWidth = Math.max(1.5, w * 0.14);
-  ctx.strokeStyle = "#ffffff";
-  ctx.fillStyle = corDoTipo(type);
-  if (type === "2") {
-    ctx.beginPath();
-    ctx.moveTo(cx, y);
-    ctx.lineTo(x + w, y + h);
-    ctx.lineTo(x, y + h);
-    ctx.closePath();
-    ctx.stroke();
-    ctx.fill();
-  } else if (type === "3") {
-    ctx.strokeStyle = corDoTipo(type);
-    ctx.lineWidth = Math.max(2, w * 0.22);
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + w, y + h);
-    ctx.moveTo(x + w, y);
-    ctx.lineTo(x, y + h);
-    ctx.stroke();
-  } else {
-    ctx.beginPath();
-    ctx.arc(cx, cy, Math.min(w, h) / 2, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fill();
-  }
+  ctx.font = `700 ${Math.round(corpo * 1.1)}px ui-sans-serif, system-ui, "Segoe UI Symbol", sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const glifo = glifoDoTipo(type);
+  ctx.lineWidth = Math.max(2, corpo * 0.22);
+  ctx.strokeStyle = "rgba(255,255,255,0.92)";
+  ctx.lineJoin = "round";
+  ctx.strokeText(glifo, cx, cy);
+  ctx.fillStyle = COR_GLIFO;
+  ctx.fillText(glifo, cx, cy);
   ctx.restore();
 }
 
@@ -100,7 +101,7 @@ export function drawManutencaoGroupMarkers(
       const nesta = itemNaColuna(cfg, m, c.id);
       ctx.save();
       ctx.globalAlpha = nesta ? 0.45 : 0.12;
-      desenharIcone(ctx, m.type || "1", cx, y, iconW, iconH);
+      desenharGlifo(ctx, m.type || "1", cx, y, iconW, iconH);
       ctx.restore();
       ctx.save();
       ctx.globalAlpha = 0.5;
@@ -113,7 +114,7 @@ export function drawManutencaoGroupMarkers(
 
     ctx.save();
     if (!impresso) ctx.globalAlpha = 0.22;
-    desenharIcone(ctx, m.type || "1", x, y, iconW, iconH);
+    desenharGlifo(ctx, m.type || "1", x, y, iconW, iconH);
     ctx.restore();
 
     ctx.save();

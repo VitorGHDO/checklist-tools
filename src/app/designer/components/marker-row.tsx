@@ -181,9 +181,18 @@ export function MarkerRow({
         {isManutencao ? (
           (
             [
-              ["1", "●", "bola verde", "bg-[#0BB783] text-white border-[#0BB783]"],
-              ["2", "▲", "triângulo amarelo", "bg-[#FFB822] text-white border-[#FFB822]"],
-              ["3", "✕", "X vermelho", "bg-[#F64E60] text-white border-[#F64E60]"],
+              ["1", "✓", "OK — imprime ✓", "bg-[#0BB783] text-white border-[#0BB783]"],
+              ["3", "✕", "Substituir — imprime X", "bg-[#F64E60] text-white border-[#F64E60]"],
+              // O triângulo saiu do formulário (só há OK e Substituir); o botão só aparece
+              // em item de plano antigo que ainda esteja marcado assim, para dar como trocar.
+              ...(m.type === "2"
+                ? ([["2", "▲", "triângulo (formato antigo)", "bg-[#FFB822] text-white border-[#FFB822]"]] as [
+                    string,
+                    string,
+                    string,
+                    string,
+                  ][])
+                : []),
             ] as [string, string, string, string][]
           ).map(([val, glyph, titulo, onClass]) => {
             const active = (m.type || "1") === val;

@@ -79,7 +79,8 @@ export function drawRoteiroGroupMarkers(
     ctx.save();
     ctx.strokeStyle = tColor;
     ctx.lineWidth = Math.max(2, cv.width * 0.0026);
-    ctx.strokeRect(fx_ - cellWpx / 2, fy_ - cellHpx / 2, cellWpx, cellHpx);
+    // Contorno da célula: desligável na folha para conferir o símbolo contra o fundo.
+    if (!page.hideMarkBox) ctx.strokeRect(fx_ - cellWpx / 2, fy_ - cellHpx / 2, cellWpx, cellHpx);
     if (isSel) {
       ctx.strokeStyle = "rgba(242,169,74,0.85)";
       ctx.lineWidth = Math.max(1, cv.width * 0.0013);

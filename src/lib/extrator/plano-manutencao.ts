@@ -15,6 +15,19 @@
 import type { PerguntaAssociada } from "@/lib/types";
 import type { MigrationField } from "@/app/api/generate-fields/route";
 
+// ─── blocos da folha que não são itens ────────────────────────────────────────
+// O rodapé "NOTAS" traz as observações do plano ("(1) Itens que devem ser substituídos
+// ...") em linhas que a heurística de seção enxerga como cabeçalho e itens. Nada ali é
+// campo do formulário nem marcação no PDF, então o bloco é descartado na extração.
+
+const SECOES_IGNORADAS = [/^\s*notas?\s*:?\s*$/i];
+
+/** O título é de um bloco que não vira seção do checklist? */
+export function secaoIgnorada(titulo: string | undefined): boolean {
+  const t = (titulo ?? "").trim();
+  return t.length > 0 && SECOES_IGNORADAS.some((re) => re.test(t));
+}
+
 // ─── itens cobrados por km E por tempo ────────────────────────────────────────
 // Na folha, operações como "Fluido de freio" ocupam UMA linha com DUAS sub-linhas
 // ("Km" e "Meses"), cada uma com marcação e Y próprios. Isso é um campo no PDF e

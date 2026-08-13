@@ -240,6 +240,9 @@ export interface DesignerPage {
   /** Mover um item (campo Y ou arrasto) empurra os itens abaixo dele no mesmo grupo
    *  pelo mesmo deslocamento, preservando o espaçamento entre eles. */
   pushBelow?: boolean;
+  /** Esconde o retângulo desenhado em volta de cada marcação no canvas. O símbolo, a
+   *  linha do topo e o realce do item selecionado continuam. Só afeta a tela. */
+  hideMarkBox?: boolean;
   footerLike?: boolean;
   /** Faixa útil (mm) desta folha no fluxo contínuo: onde a 1ª marcação começa e até
    *  onde a última pode ir. Calibrada por folha porque a 1ª tem o cabeçalho do

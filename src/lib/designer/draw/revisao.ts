@@ -66,7 +66,7 @@ export function drawRevisaoGroupMarkers(
       ctx.save();
       ctx.strokeStyle = badgeColor;
       ctx.lineWidth = Math.max(2, cv.width * 0.0026);
-      ctx.strokeRect(xpx - w / 2, ypx - h / 2, w, h);
+      if (!page.hideMarkBox) ctx.strokeRect(xpx - w / 2, ypx - h / 2, w, h);
       if (isSel) {
         ctx.strokeStyle = "rgba(242,169,74,0.85)";
         ctx.lineWidth = Math.max(1, cv.width * 0.0013);
@@ -100,7 +100,7 @@ export function drawRevisaoGroupMarkers(
         ctx.strokeStyle = colColor;
         ctx.globalAlpha = active ? 1 : 0.55;
         ctx.lineWidth = Math.max(active ? 2.4 : 1.4, cv.width * (active ? 0.0026 : 0.0016));
-        ctx.strokeRect(xpx - w / 2, y - h / 2, w, h);
+        if (!page.hideMarkBox) ctx.strokeRect(xpx - w / 2, y - h / 2, w, h);
         ctx.restore();
         if (active && isSel) {
           ctx.save();
