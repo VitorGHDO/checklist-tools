@@ -4,6 +4,9 @@
 
 import { REVISAO_X_OFFSET, REVISAO_Y_OFFSET } from "./constants";
 import { isMirrored, resolveMarkerFields } from "./mirror";
+import { criarFonte, headerFieldLines, phpEscape } from "./export-cabecalho";
+import { getManutencaoConfig } from "./manutencao";
+import { getFormularioConfig } from "./formulario";
 import type { DesignerGroup, DesignerPage, HeaderField } from "./types";
 
 export type ExportFmt = "campos" | "y" | "xy";
@@ -33,9 +36,9 @@ function mirrorCallLines(
   return out;
 }
 
-export function phpEscape(str: string): string {
-  return String(str).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-}
+// Mora em export-cabecalho (junto do resto da emissão), mas segue exportado daqui:
+// vários módulos já importavam `phpEscape` deste arquivo.
+export { phpEscape };
 
 function formatCamposArray(labels: string[]): string {
   const lines: string[] = [];
@@ -236,9 +239,31 @@ function generateHeaderFieldCode(field: HeaderField, page: DesignerPage, prec: n
   return lines.join("\n");
 }
 
-function generateHeaderCode(page: DesignerPage, prec: number): string {
+/**
+ * Plano de manutenção e formulários gerais leem a resposta por OBJETO
+ * (`$resposta->placa`), não pelo array `$dadosChecklist` dos outros docTypes.
+ */
+function usaObjetoDeResposta(page: DesignerPage): boolean {
+  return page.docType === "manutencao" || page.docType === "formulario";
+}
+
+function generateHeaderCode(page: DesignerPage, prec: number, varResposta = "resposta"): string {
   if (!page.headerFields || page.headerFields.length === 0) return "// (nenhum campo de cabeçalho nesta aba)";
+  if (usaObjetoDeResposta(page)) {
+    // Mesmo emissor que o arquivo desses docTypes usa, para o bloco avulso do cabeçalho
+    // sair idêntico ao que aparece dentro de gerarDesenho.
+    const fonte = criarFonte();
+    const resp = "$" + varResposta.trim().replace(/^\$/, "");
+    return page.headerFields.flatMap((f) => headerFieldLines(f, "", fonte, resp)).join("\n");
+  }
   return page.headerFields.map((f) => generateHeaderFieldCode(f, page, prec)).join("\n\n");
+}
+
+/** Nome do objeto de respostas configurado no docType da página (sem o $). */
+function varRespostaDoDocType(pages: DesignerPage[], page: DesignerPage): string {
+  if (page.docType === "manutencao") return getManutencaoConfig(pages)?.varResposta || "resposta";
+  if (page.docType === "formulario") return getFormularioConfig(pages)?.varResposta || "resposta";
+  return "resposta";
 }
 
 function pageFundoBgVarName(pages: DesignerPage[], page: DesignerPage): string {
@@ -445,7 +470,7 @@ export function generateCodeForPage(
   prec: number,
   includeFuncDef: boolean
 ): string {
-  if (page.kind === "header") return generateHeaderCode(page, prec);
+  if (page.kind === "header") return generateHeaderCode(page, prec, varRespostaDoDocType(pages, page));
 
   const setupBlock = generatePageSetupBlock(pages, page);
   const offX = page.offsetX || 0;

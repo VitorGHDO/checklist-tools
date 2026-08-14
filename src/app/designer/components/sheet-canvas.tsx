@@ -19,7 +19,9 @@ import { drawRoteiroGroupMarkers } from "@/lib/designer/draw/roteiro";
 import { drawRevisaoGroupMarkers } from "@/lib/designer/draw/revisao";
 import { drawPosvendaDiffGroupMarkers, drawPosvendaSameGroupMarkers } from "@/lib/designer/draw/posvenda";
 import { drawManutencaoGroupMarkers } from "@/lib/designer/draw/manutencao";
+import { drawFormularioGroupMarkers } from "@/lib/designer/draw/formulario";
 import { getManutencaoConfig } from "@/lib/designer/manutencao";
+import { colunaDoItem, getFormularioConfig } from "@/lib/designer/formulario";
 import { drawHeaderFields } from "@/lib/designer/draw/header";
 import { drawGroupYStartPreview } from "@/lib/designer/draw/preview";
 import type { DesignerGroup, DesignerPage, EditorState, HeaderField, Marker } from "@/lib/designer/types";
@@ -113,15 +115,21 @@ export function SheetCanvas({
       const group = page.groups[gi];
       const isRevisao = group.docType === "revisao";
       const isPosvendaDiff = group.docType === "posvenda" && group.posvendaXMode === "diff";
+      const isFormulario = group.docType === "formulario";
+      const formCfgHit = isFormulario ? getFormularioConfig(st.pages) : null;
       for (let i = group.markers.length - 1; i >= 0; i--) {
         const m = group.markers[i];
         let mxMm: number;
-        if (isRevisao) mxMm = group.colX2 !== undefined ? group.colX2 : 0;
+        if (isFormulario) mxMm = colunaDoItem(formCfgHit, m)?.x ?? 0;
+        else if (isRevisao) mxMm = group.colX2 !== undefined ? group.colX2 : 0;
         else if (isPosvendaDiff) {
           const opts = group.posvendaOpts || [];
           mxMm = opts.length ? (group.optX ? group.optX[opts[Math.floor(opts.length / 2)].valor] : 0) || 0 : 0;
         } else mxMm = (m.fx ?? 0) * page.widthMm;
-        const mx = isRevisao || isPosvendaDiff ? (mxMm / page.widthMm) * cv.width : (m.fx ?? 0) * cv.width;
+        const mx =
+          isRevisao || isPosvendaDiff || isFormulario
+            ? (mxMm / page.widthMm) * cv.width
+            : (m.fx ?? 0) * cv.width;
         const my = m.fy * cv.height;
         const dAnchor = Math.hypot(mx - px, my - py);
         if (dAnchor <= rAnchor && dAnchor < bestDist) {
@@ -256,9 +264,12 @@ export function SheetCanvas({
     const activeGroup = page.groups.find((g) => g.id === page.activeGroupId);
     if (activeGroup) drawGroupYStartPreview(ctx, cv, page, activeGroup, r);
     const manutCfg = page.docType === "manutencao" ? getManutencaoConfig(st.pages) : null;
+    const formCfg = page.docType === "formulario" ? getFormularioConfig(st.pages) : null;
     page.groups.forEach((group) => {
       if (group.docType === "manutencao") {
         if (manutCfg) drawManutencaoGroupMarkers(ctx, cv, page, group, r, manutCfg, st.selectedMarkerId);
+      } else if (group.docType === "formulario") {
+        if (formCfg) drawFormularioGroupMarkers(ctx, cv, page, group, r, formCfg, st.selectedMarkerId);
       } else if (group.docType === "revisao") {
         drawRevisaoGroupMarkers(ctx, cv, page, group, r, st.selectedMarkerId);
       } else if (group.docType === "posvenda" && group.posvendaXMode === "diff") {
@@ -420,7 +431,10 @@ export function SheetCanvas({
     const m = group?.markers.find((mm) => mm.id === d.markerId);
     if (group && m) {
       const skipX =
-        group.docType === "revisao" || group.docType === "posvenda" || group.docType === "manutencao";
+        group.docType === "revisao" ||
+        group.docType === "posvenda" ||
+        group.docType === "manutencao" ||
+        group.docType === "formulario";
       if (!skipX) m.fx = clamp01(pos.x / cv.width);
       const fyAntes = m.fy;
       m.fy = clamp01(pos.y / cv.height);
@@ -473,6 +487,10 @@ export function SheetCanvas({
         if (cap.kind === "flowTop") target.flowTop = +ymm.toFixed(2);
         else target.flowBottom = +ymm.toFixed(2);
       }
+    } else if (cap.kind === "formularioColX") {
+      const cfg = getFormularioConfig(st.pages);
+      const col = cfg?.colunas.find((c) => c.id === cap.colunaId);
+      if (col) col.x = +xmm.toFixed(2);
     } else if (cap.kind === "manutencaoColX") {
       const cfg = getManutencaoConfig(st.pages);
       const col = cfg?.colunas.find((c) => c.id === cap.colunaId);

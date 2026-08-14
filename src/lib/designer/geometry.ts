@@ -29,6 +29,9 @@ export function makeMarker(group: DesignerGroup, page: DesignerPage, label: stri
   } else if (group.docType === "manutencao") {
     // O X vem da revisão impressa (coluna), não do marcador — só o Y é dele.
     base.type = "1";
+  } else if (group.docType === "formulario") {
+    // O X vem da coluna de resultado escolhida; "1" é a primeira (OK).
+    base.type = "1";
   } else {
     base.type = "check";
     base.fx = clamp01(group.xFixed / page.widthMm);

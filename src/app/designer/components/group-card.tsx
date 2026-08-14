@@ -30,6 +30,7 @@ import type {
   DesignerGroup,
   DesignerPage,
   EditorState,
+  FormularioConfig,
   ManutencaoConfig,
 } from "@/lib/designer/types";
 
@@ -47,6 +48,8 @@ interface Props {
   onSplitAt?: (page: DesignerPage, group: DesignerGroup, fromIndex: number) => void;
   /** manutenção: config do plano, para o seletor de condição das linhas. */
   manutencaoCfg?: ManutencaoConfig | null;
+  /** formulário: colunas de resultado, para as teclas de resposta das linhas. */
+  formularioCfg?: FormularioConfig | null;
   /** Move um item só para o fim do grupo anterior. */
   onMoveMarkerToPrev?: (page: DesignerPage, group: DesignerGroup, index: number) => void;
   /** manutenção: abre a grade de revisões no item clicado. */
@@ -63,6 +66,7 @@ export function GroupCard({
   onMoveToSheet,
   onSplitAt,
   manutencaoCfg,
+  formularioCfg,
   onMoveMarkerToPrev,
   onAbrirGrade,
 }: Props) {
@@ -569,6 +573,7 @@ export function GroupCard({
                 rerender={rerender}
                 commit={commit}
                 manutencaoCfg={manutencaoCfg}
+                formularioCfg={formularioCfg}
                 canSplit={i > 0 && !!onSplitAt}
                 onSplitHere={onSplitAt ? () => onSplitAt(page, group, i) : undefined}
                 onMoveToPrevGroup={

@@ -14,6 +14,7 @@ import type {
   DesignerGroup,
   DesignerPage,
   EditorState,
+  FormularioConfig,
   ManutencaoConfig,
   Marker,
 } from "@/lib/designer/types";
@@ -29,6 +30,8 @@ interface Props {
   commit: () => void;
   /** manutenção: para o seletor de condição da linha. */
   manutencaoCfg?: ManutencaoConfig | null;
+  /** formulário: colunas de resultado, para as teclas de resposta da linha. */
+  formularioCfg?: FormularioConfig | null;
   /** Move deste item em diante para a folha seguinte, como "(cont.)". */
   onSplitHere?: () => void;
   /** false no 1º item: não faz sentido "partir" no começo do grupo. */
@@ -69,6 +72,7 @@ export function MarkerRow({
   rerender,
   commit,
   manutencaoCfg,
+  formularioCfg,
   onSplitHere,
   canSplit,
   onMoveToPrevGroup,
@@ -78,8 +82,10 @@ export function MarkerRow({
   const isRevisao = group.docType === "revisao";
   const isPosvenda = group.docType === "posvenda";
   const isManutencao = group.docType === "manutencao";
+  const isFormulario = group.docType === "formulario";
   // Manutenção não tem X próprio: o X é o da revisão impressa.
-  const showX = !isRevisao && !isManutencao && !(isPosvenda && group.posvendaXMode === "diff");
+  const showX =
+    !isRevisao && !isManutencao && !isFormulario && !(isPosvenda && group.posvendaXMode === "diff");
   /** Mexer no Y deste item arrasta os de baixo junto (desligável na folha). */
   const empurra = page.pushBelow !== false && index < group.markers.length - 1;
   /** Quantas revisões imprimem este item, de quantas existem. */
@@ -178,7 +184,29 @@ export function MarkerRow({
           o preview desenha o tipo do item seguinte */}
       {!isMirror && (
       <div className="flex shrink-0 border border-[#e0e0e0] rounded overflow-hidden">
-        {isManutencao ? (
+        {isFormulario && formularioCfg ? (
+          // Uma tecla por coluna de resultado: o que muda é em qual delas a marcação cai.
+          formularioCfg.colunas.map((col) => {
+            const active = (m.type ?? formularioCfg.colunas[0]?.valor) === col.valor;
+            return (
+              <button
+                key={col.id}
+                onClick={() => {
+                  m.type = col.valor;
+                  select();
+                }}
+                title={`${col.label} — imprime em x ${col.x}`}
+                className={`px-1.5 py-1 text-[9px] font-mono border-r last:border-r-0 border-[#e0e0e0] ${
+                  active
+                    ? "bg-[#173872] text-white border-[#173872]"
+                    : "bg-white text-[#b0b0bf] hover:text-[#80808F]"
+                }`}
+              >
+                {col.label}
+              </button>
+            );
+          })
+        ) : isManutencao ? (
           (
             [
               ["1", "✓", "OK — imprime ✓", "bg-[#0BB783] text-white border-[#0BB783]"],

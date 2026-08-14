@@ -1,7 +1,7 @@
 // Schema do Designer de PDF — modela o runtime do checklist_construtor.html.
 // O formato de projeto salvo em JSON é { pages: DesignerPage[] } (compatível com o standalone).
 
-export type DesignerDocType = "roteiro" | "revisao" | "posvenda" | "manutencao";
+export type DesignerDocType = "roteiro" | "revisao" | "posvenda" | "manutencao" | "formulario";
 export type PageKind = "checklist" | "header";
 
 // ─── Marker ──────────────────────────────────────────────────────────────────
@@ -143,6 +143,44 @@ export interface ManutencaoConfig {
   previewTodas?: boolean;
 }
 
+// ─── Formulários gerais ────────────────────────────────────────────────────────
+// Folhas de conferência com colunas de resultado já impressas (OK / NOK / NA...). O item
+// não escolhe o X: ele escolhe a COLUNA, e o X é o dela. A marcação é sempre o mesmo
+// símbolo — o que muda entre uma resposta e outra é em qual coluna ele cai.
+
+/** Uma coluna de resultado da folha. */
+export interface FormularioColuna {
+  id: string;
+  /** Rótulo impresso na folha ("OK", "NOK"), usado só na UI. */
+  label: string;
+  /** Valor gravado no formulário para esta coluna ("1", "3"). */
+  valor: string;
+  /** X (mm) da marcação quando esta é a resposta. */
+  x: number;
+}
+
+/** Configuração do formulário, guardada na 1ª folha do docType (como a do plano). */
+export interface FormularioConfig {
+  colunas: FormularioColuna[];
+  /** Símbolo impresso na coluna escolhida — o mesmo para todas. */
+  simbolo: string;
+  /** Sufixo das funções: gerarDesenho<sufixo> / gerarImpressao<sufixo>. */
+  sufixoFuncao: string;
+  /** codFormulario usado no WHERE da query. */
+  codFormulario: string;
+  /** Nome (sem $) do objeto com as respostas dentro da função de desenho. */
+  varResposta: string;
+  /** Caminho PHP dos fundos; `{n}` = número da folha. Vazio = chegam por parâmetro. */
+  fundoPath: string;
+  /** "funcao": só as funções (padrão); "completo": mais as declarações de caminho. */
+  formatoArquivo: "funcao" | "completo";
+  /** gerarImpressao busca o nomeFantasia da concessionária antes de desenhar. */
+  buscarNomeFantasia: boolean;
+  /** Largura/altura (mm) da caixa da marcação — usada no canvas e no writeHTMLCell. */
+  celulaW: number;
+  celulaH: number;
+}
+
 // ─── Header/Footer fields ──────────────────────────────────────────────────────
 export type HeaderAlign = "L" | "C" | "R";
 
@@ -256,6 +294,9 @@ export interface DesignerPage {
   /** Plano de manutenção: colunas de revisão, condições e identificação do PHP.
    *  Vive na 1ª folha do docType — é configuração do plano inteiro, não da folha. */
   manutencao?: ManutencaoConfig;
+  /** Formulários gerais: colunas de resultado e identificação do PHP. Também vive na
+   *  1ª folha do docType. */
+  formulario?: FormularioConfig;
 }
 
 /** Formato do arquivo JSON salvo/carregado (idêntico ao standalone). */
@@ -284,6 +325,7 @@ export type CaptureMode =
   | { kind: "flowBottom"; pageId: string }
   | { kind: "revisaoCol"; groupId: string; colKey: "colX1" | "colX2" | "colX3" }
   | { kind: "manutencaoColX"; colunaId: string }
+  | { kind: "formularioColX"; colunaId: string }
   | { kind: "posvendaOptX"; groupId: string; valor: string }
   | { kind: "headerPoint"; fieldId: string; pointKey: string }
   | null;

@@ -19,6 +19,7 @@ import {
   ClipboardCheck,
   ShoppingBag,
   CalendarCheck,
+  ClipboardList,
   FileImage,
   FileText,
   ImageIcon,
@@ -65,6 +66,8 @@ import {
 import { ReflowModal } from "./reflow-modal";
 import { ResetModal, type ResetScope } from "./reset-modal";
 import { RevisoesGridModal } from "./revisoes-grid-modal";
+import { FormularioPanel } from "./formulario-panel";
+import { ensureFormularioConfig } from "@/lib/designer/formulario";
 import type { PagingValue } from "./paging-controls";
 import {
   clearGroups,
@@ -103,6 +106,7 @@ const DOCTYPES: { id: DesignerDocType; label: string; icon: React.ElementType }[
   { id: "revisao", label: "Revisão de Entrega", icon: ClipboardCheck },
   { id: "posvenda", label: "Pós-Venda", icon: ShoppingBag },
   { id: "manutencao", label: "Plano de Manutenção", icon: CalendarCheck },
+  { id: "formulario", label: "Formulários Gerais", icon: ClipboardList },
 ];
 
 const MODES: { id: ViewMode; label: string; icon: React.ElementType }[] = [
@@ -625,6 +629,7 @@ export default function DesignerEditor() {
   const kindFilter = st.viewMode === "cabecalho" ? "header" : "checklist";
   const visiblePages = st.pages.filter((p) => p.kind === kindFilter && p.docType === st.docType);
   const manutencaoCfg = st.docType === "manutencao" ? getManutencaoConfig(st.pages) : null;
+  const formularioCfg = st.docType === "formulario" ? ensureFormularioConfig(st.pages) : null;
 
   // status
   let leftStatus = "nenhuma imagem";
@@ -1023,6 +1028,10 @@ export default function DesignerEditor() {
                 </button>
               </div>
 
+              {formularioCfg && (
+                <FormularioPanel st={st} cfg={formularioCfg} rerender={rerender} commit={commit} />
+              )}
+
               {manutencaoCfg && (
                 <ManutencaoPanel
                   st={st}
@@ -1210,6 +1219,7 @@ export default function DesignerEditor() {
                         onMoveToSheet={moveGroupToSheet}
                         onSplitAt={splitGroupAt}
                         manutencaoCfg={manutencaoCfg}
+                        formularioCfg={formularioCfg}
                         onMoveMarkerToPrev={moveMarkerToPrev}
                         onAbrirGrade={manutencaoCfg ? (markerId) => setGradeFoco(markerId) : undefined}
                       />

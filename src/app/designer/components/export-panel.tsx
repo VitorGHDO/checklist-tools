@@ -5,7 +5,9 @@ import { Copy, Download, FileCode, Files, TriangleAlert } from "lucide-react";
 import { showToast } from "@/components/ui/toast";
 import { generateAllPagesCode, generateCodeForPage, type ExportFmt } from "@/lib/designer/export-php";
 import { generateManutencaoFile, nomeFuncao } from "@/lib/designer/export-manutencao";
+import { generateFormularioFile, nomeFuncao as nomeFuncaoForm } from "@/lib/designer/export-formulario";
 import { getManutencaoConfig } from "@/lib/designer/manutencao";
+import { getFormularioConfig } from "@/lib/designer/formulario";
 import type { DesignerPage, EditorState } from "@/lib/designer/types";
 
 interface Props {
@@ -30,10 +32,25 @@ export function ExportPanel({ st, page }: Props) {
 
   // No plano de manutenção a saída é o arquivo inteiro (uma função para as N folhas),
   // não um bloco por folha — os seletores de formato não se aplicam.
-  const manutCfg = page.docType === "manutencao" ? getManutencaoConfig(st.pages) : null;
-  const manut = manutCfg ? generateManutencaoFile(st.pages, manutCfg, prec) : null;
+  // Plano e formulários gerais saem como ARQUIVO inteiro (uma função para as N folhas),
+  // não como bloco por folha — nesses dois os seletores de formato não se aplicam.
+  // Na aba de cabeçalho/footer o que interessa é o BLOCO daqueles campos, não o arquivo
+  // inteiro do documento — é esse trecho que se cola na função de desenho.
+  const isHeaderPage = page.kind === "header";
+  const manutCfg = !isHeaderPage && page.docType === "manutencao" ? getManutencaoConfig(st.pages) : null;
+  const formCfg = !isHeaderPage && page.docType === "formulario" ? getFormularioConfig(st.pages) : null;
+  const manut = manutCfg
+    ? generateManutencaoFile(st.pages, manutCfg, prec)
+    : formCfg
+    ? generateFormularioFile(st.pages, formCfg, prec)
+    : null;
+  const nomeDesenho = manutCfg
+    ? nomeFuncao("gerarDesenho", manutCfg)
+    : formCfg
+    ? nomeFuncaoForm("gerarDesenho", formCfg)
+    : "";
   const code = manut ? manut.code : generateCodeForPage(st.pages, page, fmt, prec, includeFunc);
-  const isHeader = page.kind === "header";
+  const isHeader = isHeaderPage;
   const showFmt = !isHeader && !manut;
 
   return (
@@ -43,7 +60,7 @@ export function ExportPanel({ st, page }: Props) {
         Exportar PHP
         {manut && (
           <span className="normal-case tracking-normal text-[10px] text-[#173872] font-mono">
-            {nomeFuncao("gerarDesenho", manutCfg!)}()
+            {nomeDesenho}()
           </span>
         )}
       </h2>
@@ -91,8 +108,9 @@ export function ExportPanel({ st, page }: Props) {
 
       {manut && (
         <p className="text-[10.5px] text-[#80808F] leading-snug">
-          Arquivo completo do plano: as {st.pages.filter((p) => p.kind === "checklist" && p.docType === "manutencao").length}{" "}
-          folha(s), o switch da revisão, os helpers de condição e a função de impressão.
+          {manutCfg
+            ? `Arquivo completo do plano: as ${st.pages.filter((p) => p.kind === "checklist" && p.docType === "manutencao").length} folha(s), o switch da revisão, os helpers de condição e a função de impressão.`
+            : `Arquivo completo do formulário: as ${st.pages.filter((p) => p.kind === "checklist" && p.docType === "formulario").length} folha(s), a marcação por coluna de resultado e a função de impressão.`}
         </p>
       )}
 
