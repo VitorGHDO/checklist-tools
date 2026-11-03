@@ -13,6 +13,19 @@ pasta do repositório de destino para `<repo>/.claude/skills/`, gravando só o q
 | `acampaChecklist/` | acampa-checklist | `checklist-pos-venda` |
 | `eiChecklist/` | stellantis-ei-checklist | `checklist-designer`, `checklist-pdf-marcacoes` |
 
+## Ferramentas que vão junto
+
+O que a skill chama fora de `.claude/skills` também é instalado no envio (lista `FERRAMENTAS` na rota):
+
+| Origem no checklist-tools | Destino no repositório | Repositório |
+|---|---|---|
+| `tools/medicao/` | `tools/checklist/` | acampa-checklist |
+| `skills/_raiz/acampaChecklist/docs/` | `docs/` (`novo-checklist-pos-venda.md`) | acampa-checklist |
+
+No mesmo envio, o `.gitignore` do repositório ganha o que faltar entre `.claude/`, `__pycache__/` e os
+destinos acima, num bloco comentado no fim. É bancada de trabalho: não vai para o git do checklist.
+`_raiz/` não é skill: espelha arquivos da raiz do repositório de destino.
+
 ## Para mudar uma skill
 
 Edite **aqui** e faça commit no checklist-tools. Editar direto em `<repo>/.claude/skills/` não adianta:

@@ -35,7 +35,7 @@ export function CampoRepositorio({ chave, valor, onChange }: Props) {
   useEffect(() => {
     let vivo = true;
     const t = setTimeout(async () => {
-      const r = await api<{ valido: boolean; motivo: string }>({ acao: "verificar", caminho: valor, exigir: repo.exigir });
+      const r = await api<{ valido: boolean; motivo: string }>({ acao: "verificar", caminho: valor, exigir: repo.exigir, nome: repo.rotulo });
       if (!vivo) return;
       setStatus(r);
       if (r.valido) lembrarRepositorio(chave, valor);
@@ -44,7 +44,7 @@ export function CampoRepositorio({ chave, valor, onChange }: Props) {
       vivo = false;
       clearTimeout(t);
     };
-  }, [valor, chave, repo.exigir]);
+  }, [valor, chave, repo.exigir, repo.rotulo]);
 
   async function abrir(caminho: string) {
     const r = await api<{ caminho: string; pai: string | null; pastas: string[]; erro?: string }>({ acao: "listar", caminho });

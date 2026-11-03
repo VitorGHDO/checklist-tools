@@ -14,8 +14,9 @@ export const REPOSITORIOS = {
   acampaApi: { rotulo: "acampa-api-lumen", padrao: "C:/xampp/htdocs/acampa-api-lumen", exigir: "database/migrations" },
   /** imprimir.php do Entrega Impecável. */
   eiChecklist: { rotulo: "stellantis-ei-checklist", padrao: "C:/xampp/htdocs/stellantis-ei-checklist", exigir: "stellantis" },
-  /** imprimir.php do pós-venda e dos planos. */
-  acampaChecklist: { rotulo: "acampa-checklist", padrao: "C:/xampp/htdocs/acampa-checklist", exigir: "tools/checklist" },
+  /** imprimir.php do pós-venda e dos planos. O marcador é a referência que a skill usa
+   *  (versionada); tools/checklist não serve: é instalado pela própria ferramenta. */
+  acampaChecklist: { rotulo: "acampa-checklist", padrao: "C:/xampp/htdocs/acampa-checklist", exigir: "parvi_frota/v1" },
 } as const;
 
 export type ChaveRepositorio = keyof typeof REPOSITORIOS;
@@ -57,7 +58,7 @@ export async function gravarNoRepositorio(
     fetch("/api/gravar-repositorio", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ repo: repo.trim(), exigir: REPOSITORIOS[k].exigir, arquivos, sobrescrever }),
+      body: JSON.stringify({ repo: repo.trim(), exigir: REPOSITORIOS[k].exigir, nome: REPOSITORIOS[k].rotulo, arquivos, sobrescrever }),
     }).then(async (r) => ({ status: r.status, corpo: await r.json() }));
 
   let r = await enviar(false);

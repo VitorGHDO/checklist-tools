@@ -303,6 +303,8 @@ export interface PagedImportResult {
   pagesUsed: number;
   /** Quantos grupos precisaram ser partidos por não caberem em uma folha inteira. */
   splitCount: number;
+  /** Quanto (mm) a última folha passa da área útil por causa do teto de folhas. */
+  overflowMm: number;
 }
 
 /**
@@ -340,6 +342,8 @@ export interface ImportPlan {
   targetSheets?: number;
   /** Itens por folha que o alvo implica. 0 quando não há alvo. */
   itemsPerSheet: number;
+  /** Quanto (mm) a última folha passa da área útil — só acontece com alvo (teto de folhas). */
+  overflowMm: number;
 }
 
 /**
@@ -417,8 +421,13 @@ export function planPagedImport(
     // Não cabe no que resta da folha: vira a folha (só se a atual já tem conteúdo —
     // criar uma folha nova deixando a anterior vazia não faria sentido).
     // Quebra por alvo: esta folha já recebeu a cota que lhe cabia.
+    // Com alvo, o número de folhas do extrator (uma imagem por folha) é teto: não se
+    // cria folha além dele. O que não couber fica na última e o estouro é reportado —
+    // no pós-venda os grupos ficam lado a lado na folha, então a altura empilhada
+    // sempre passa da área útil e gerava folhas sem imagem.
     const reachedQuota = itemsThisSheet >= quota;
-    if ((fits < item.names.length || reachedQuota) && hasContent) {
+    const podeVirar = !target || sheetIdx < target - 1;
+    if ((fits < item.names.length || reachedQuota) && hasContent && podeVirar) {
       cur = [];
       sheets.push(cur);
       hasContent = false;
@@ -432,7 +441,7 @@ export function planPagedImport(
     // Não cabe nem em uma folha inteira. Com neverSplit, o grupo entra inteiro e o
     // estouro é reportado — partir é decisão do usuário, nunca do sistema.
     let names = item.names;
-    if (fits < names.length && !opts.neverSplit) {
+    if (fits < names.length && !opts.neverSplit && podeVirar) {
       const take = Math.max(1, fits);
       names = item.names.slice(0, take);
       queue.unshift({ title: item.title, names: item.names.slice(take), cont: item.cont + 1 });
@@ -449,6 +458,10 @@ export function planPagedImport(
     cursorY = cursorY + Math.max(0, names.length - 1) * inc + gap;
   }
 
+  const ultima = sheets[sheets.length - 1];
+  const fim = ultima.length ? ultima[ultima.length - 1] : null;
+  const fimY = fim ? fim.yStart + Math.max(0, fim.names.length - 1) * inc : 0;
+
   return {
     sheets,
     splitCount,
@@ -456,6 +469,7 @@ export function planPagedImport(
     increment: inc,
     targetSheets: opts.targetSheets,
     itemsPerSheet,
+    overflowMm: Math.max(0, +(fimY - opts.yLimit).toFixed(1)),
   };
 }
 
@@ -577,5 +591,6 @@ export function importMigrationGroupsPaged(
     pagesEmptied: pagesEmptied.filter((p) => p.groups.length === 0),
     pagesUsed: plan.sheets.length,
     splitCount: plan.splitCount,
+    overflowMm: plan.overflowMm,
   };
 }

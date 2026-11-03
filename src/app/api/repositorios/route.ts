@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { outroRepositorio } from "@/lib/repositorio-servidor";
 
 export const runtime = "nodejs";
 
@@ -45,10 +46,12 @@ async function raizes(): Promise<string[]> {
 
 const barra = (p: string) => p.replace(/\\/g, "/");
 
-async function verificar(caminho: string, exigir: string) {
+async function verificar(caminho: string, exigir: string, nome?: string) {
   if (!caminho || !path.isAbsolute(caminho)) return { valido: false, motivo: "informe o caminho completo" };
   if (!(await ehPasta(caminho))) return { valido: false, motivo: "pasta não existe" };
   if (!(await ehPasta(path.join(caminho, ...exigir.split("/"))))) return { valido: false, motivo: `sem ${exigir}` };
+  const outro = nome ? await outroRepositorio(caminho, nome) : null;
+  if (outro) return { valido: false, motivo: `é o ${outro}, não o ${nome}` };
   return { valido: true, motivo: "" };
 }
 
@@ -81,7 +84,7 @@ async function procurar(alvos: { chave: string; nome: string; exigir: string }[]
       const filho = path.join(p, nome);
       for (const a of alvos) {
         if (achados[a.chave] || nome.toLowerCase() !== a.nome.toLowerCase()) continue;
-        if ((await verificar(filho, a.exigir)).valido) achados[a.chave] = barra(filho);
+        if ((await verificar(filho, a.exigir, a.nome)).valido) achados[a.chave] = barra(filho);
       }
       if (nivel < 2) fila.push({ p: filho, nivel: nivel + 1 });
     }
@@ -94,6 +97,7 @@ export async function POST(req: NextRequest) {
     acao?: string;
     caminho?: string;
     exigir?: string;
+    nome?: string;
     alvos?: { chave: string; nome: string; exigir: string }[];
   };
   try {
@@ -103,7 +107,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (corpo.acao === "verificar") {
-    return NextResponse.json(await verificar((corpo.caminho ?? "").trim(), corpo.exigir ?? ""));
+    return NextResponse.json(await verificar((corpo.caminho ?? "").trim(), corpo.exigir ?? "", corpo.nome));
   }
 
   if (corpo.acao === "listar") {

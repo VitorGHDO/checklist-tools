@@ -297,6 +297,8 @@ export default function DesignerEditor() {
     let suffix = ` em ${r.pagesUsed} folha(s)`;
     if (targetSheets && r.pagesUsed !== targetSheets)
       suffix += ` — o extrator indicava ${targetSheets}; ajuste o gap ou a área útil`;
+    if (r.overflowMm > 0)
+      suffix += ` · empilhados, passam ${r.overflowMm}mm da área útil; use “mapear tudo” para posicionar pela arte`;
     if (r.pagesCreated.length) suffix += ` (${r.pagesCreated.length} nova(s), sem imagem)`;
     if (r.pagesEmptied.length) suffix += ` · ${r.pagesEmptied.length} folha(s) ficaram vazias`;
     return { created: r.created, suffix };

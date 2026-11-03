@@ -3,13 +3,14 @@
 // máquina do usuário, então a rota escreve direto no disco.
 //
 // Cuidados: o repositório tem de ter a pasta que o identifica (`exigir`: database/migrations
-// numa API, tools/checklist no acampa-checklist…), todo caminho é relativo, sem "..", e
+// numa API, parvi_frota/v1 no acampa-checklist…) e, havendo remote no git, o nome dele confere; todo caminho é relativo, sem "..", e
 // resolve dentro do repositório; nada é sobrescrito sem o usuário confirmar (409 lista o
 // que já existe). Migration é só gravada — rodar continua com o usuário.
 
 import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { outroRepositorio } from "@/lib/repositorio-servidor";
 
 export const runtime = "nodejs";
 
@@ -26,6 +27,8 @@ interface Entrada {
   repo: string;
   /** Pasta que precisa existir no repositório para ele ser o certo. */
   exigir: string;
+  /** Nome esperado no remote do git (as duas APIs têm as mesmas pastas). */
+  nome?: string;
   arquivos: ArquivoParaGravar[];
   sobrescrever?: boolean;
 }
@@ -53,13 +56,15 @@ export async function POST(req: NextRequest) {
   } catch {
     return erro("Corpo inválido.");
   }
-  const { repo, exigir, arquivos, sobrescrever } = entrada;
+  const { repo, exigir, nome, arquivos, sobrescrever } = entrada;
 
   if (!repo || !path.isAbsolute(repo)) return erro("Informe o caminho completo do repositório.");
   const raiz = path.resolve(repo);
   if (!exigir || !(await existe(path.join(raiz, ...exigir.split("/"))))) {
     return erro(`"${repo}" não parece o repositório certo (não achei ${exigir}).`);
   }
+  const outro = nome ? await outroRepositorio(raiz, nome) : null;
+  if (outro) return erro(`"${repo}" é o ${outro}, não o ${nome}.`);
   if (!Array.isArray(arquivos) || arquivos.length === 0) return erro("Nada para gravar.");
 
   const destinos: { abs: string; rel: string; a: ArquivoParaGravar }[] = [];

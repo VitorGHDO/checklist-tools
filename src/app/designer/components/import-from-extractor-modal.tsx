@@ -201,9 +201,9 @@ export function ImportFromExtractorModal({ pages, page, onClose, onPick }: Props
                 <span>
                   <b>usar a quantidade de folhas do extrator</b>
                   <span className="block text-[10.5px] text-[#80808F] leading-snug">
-                    Distribui os campos igualmente nas folhas que você enviou como imagem de referência, em vez de
-                    estimar pela altura. A área útil continua sendo o teto — se o alvo não couber, saem mais folhas e o
-                    aviso aparece.
+                    Distribui os campos nas folhas que você enviou como imagem de referência, em vez de estimar pela
+                    altura. Não cria folha além dessas: o que não couber empilhado fica na última e o “mapear tudo”
+                    posiciona pela arte.
                   </span>
                 </span>
               </label>
