@@ -18,22 +18,34 @@ const MIRROR_NOTE =
  * Chamadas avulsas para os rótulos de referência. Necessário sempre que o formato indexa
  * as posições por nome de campo (`'campo' => y`): como o rótulo usa o campo do item
  * seguinte, ele colidiria com a chave dele e o PHP manteria só uma das posições.
+ *
+ * `makeCall` monta a chamada do docType (printChecklistMark no roteiro/pós-venda,
+ * imprimirResposta na revisão); recebe o campo efetivo e o índice do marcador.
  */
 function mirrorCallLines(
   group: DesignerGroup,
   fields: string[],
-  ys: number[],
-  prec: number,
-  xArg?: (i: number) => string,
+  makeCall: (field: string, i: number) => string,
 ): string[] {
   const out: string[] = [];
   group.markers.forEach((_, i) => {
     if (!isMirrored(group, i)) return;
     if (out.length === 0) out.push(MIRROR_NOTE);
-    const pos = xArg ? `${ys[i].toFixed(prec)}, ${xArg(i)}` : ys[i].toFixed(prec);
-    out.push(`printChecklistMark($pdf, $dadosChecklist['${phpEscape(fields[i])}'], ${pos});`);
+    out.push(makeCall(fields[i], i));
   });
   return out;
+}
+
+/** Chamada avulsa do roteiro/pós-venda: só Y, ou Y e X quando o formato carrega os dois. */
+function checklistMarkCall(
+  ys: number[],
+  prec: number,
+  xArg?: (i: number) => string,
+): (field: string, i: number) => string {
+  return (field, i) => {
+    const pos = xArg ? `${ys[i].toFixed(prec)}, ${xArg(i)}` : ys[i].toFixed(prec);
+    return `printChecklistMark($pdf, $dadosChecklist['${phpEscape(field)}'], ${pos});`;
+  };
 }
 
 // Mora em export-cabecalho (junto do resto da emissão), mas segue exportado daqui:
@@ -174,7 +186,7 @@ function generateCompactBlockForGroup(
     lines.push(`foreach ($${varName} as $campo => $y) {`);
     lines.push("\tprintChecklistMark($pdf, $dadosChecklist[$campo], $y);");
     lines.push("}");
-    lines.push(...mirrorCallLines(group, fields, ys, prec));
+    lines.push(...mirrorCallLines(group, fields, checklistMarkCall(ys, prec)));
     endY = null;
   }
   return { code: lines.join("\n"), endY, uniform };
@@ -391,14 +403,21 @@ function generateRevisaoCompactBlockForGroup(
   }
   const dadosVar = "$perguntasRespostasImprimir";
 
+  // Campos efetivos: rótulos de referência emprestam o campo do item seguinte.
+  const fields = resolveMarkerFields(group);
+  const hasMirror = group.markers.some((_, i) => isMirrored(group, i));
+
   const lines: string[] = [];
   if (!isDefaultGroupTitle(group.title)) lines.push("/** " + group.title + " */");
   let endY: number | null = null;
 
   if (uniform) {
     const varName = slugifyVarName(group.title, "campos", usedNames);
+    // O array é percorrido em ordem com $posY += inc, então o campo repetido imprime a
+    // mesma marcação na linha do rótulo e na do item — não precisa de chamada avulsa.
+    if (hasMirror) lines.push(MIRROR_NOTE);
     lines.push(`$${varName} = [`);
-    lines.push(formatCamposArray(group.markers.map((m) => m.label)));
+    lines.push(formatCamposArray(fields));
     lines.push("];");
     if (chainFrom === null || chainFrom === undefined) {
       const posYInicial = (ys[0] - inc).toFixed(prec);
@@ -414,13 +433,21 @@ function generateRevisaoCompactBlockForGroup(
     const varName = slugifyVarName(group.title, "posicoes", usedNames);
     lines.push("// (posições deste grupo não seguem um incremento único — mantido em array explícito)");
     lines.push(`$${varName} = [`);
-    group.markers.forEach((m, i) => {
-      lines.push(`\t'${phpEscape(m.label)}' => ${ys[i].toFixed(prec)},`);
+    group.markers.forEach((_, i) => {
+      if (isMirrored(group, i)) return; // sai depois, avulso: a chave colidiria com a do item
+      lines.push(`\t'${phpEscape(fields[i])}' => ${ys[i].toFixed(prec)},`);
     });
     lines.push("];");
     lines.push(`foreach ($${varName} as $campo => $y) {`);
     lines.push(`\timprimirResposta($pdf, ${dadosVar}, $campo, $y);`);
     lines.push("}");
+    lines.push(
+      ...mirrorCallLines(
+        group,
+        fields,
+        (field, i) => `imprimirResposta($pdf, ${dadosVar}, '${phpEscape(field)}', ${ys[i].toFixed(prec)});`,
+      ),
+    );
     endY = null;
   }
   return { code: lines.join("\n"), endY, uniform };
@@ -522,7 +549,11 @@ export function generateCodeForPage(
         }
       });
       mirrorTail.push(
-        ...mirrorCallLines(g, fields, ys, prec, fmt === "y" && !isPosvendaPage ? undefined : xOf),
+        ...mirrorCallLines(
+          g,
+          fields,
+          checklistMarkCall(ys, prec, fmt === "y" && !isPosvendaPage ? undefined : xOf),
+        ),
       );
     });
     lines.push("];");

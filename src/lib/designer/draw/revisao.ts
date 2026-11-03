@@ -1,6 +1,10 @@
 // Desenho das marcações do docType "revisão" — portado de drawRevisaoGroupMarkers/revisaoMarkColor.
 
 import type { DesignerGroup, DesignerPage, Marker } from "../types";
+import { isMirrored, mirrorTargetIndex } from "../mirror";
+
+/** Cor do badge de um rótulo de referência, para separá-lo dos itens com resposta própria. */
+const MIRROR_COLOR = "#8950FC";
 
 export function revisaoMarkColor(m: Marker): string {
   if (m.tipo === "texto") return "#4d9eff";
@@ -19,16 +23,22 @@ export function drawRevisaoGroupMarkers(
   selectedMarkerId: string | null
 ): void {
   group.markers.forEach((m, idx) => {
+    // Rótulo de referência imprime a marcação do item seguinte — o preview mostra a
+    // mesma resposta, que é justamente a coerência visual que se quer conferir aqui.
+    const mirrored = isMirrored(group, idx);
+    const src = mirrored ? group.markers[mirrorTargetIndex(group.markers, idx)] : m;
     const y = m.fy * cv.height;
     const isSel = m.id === selectedMarkerId;
-    const badgeColor = isSel ? "#f2a94a" : revisaoMarkColor(m);
+    const markColor = revisaoMarkColor(src);
+    const badgeColor = isSel ? "#f2a94a" : mirrored ? MIRROR_COLOR : markColor;
+    const boxColor = isSel ? "#f2a94a" : markColor;
     const anchorXmm = group.colX2 !== undefined ? group.colX2 : 0;
     const x = (anchorXmm / page.widthMm) * cv.width;
 
     const colHpx = ((group.colH || 6.3) / page.heightMm) * cv.height;
     const textHpx = ((group.textH || 5) / page.heightMm) * cv.height;
     const textOffPx = ((group.textYOffset || 0) / page.heightMm) * cv.height;
-    const topLineY = m.tipo === "texto" ? y + textOffPx - textHpx / 2 : y - colHpx / 2;
+    const topLineY = src.tipo === "texto" ? y + textOffPx - textHpx / 2 : y - colHpx / 2;
 
     ctx.strokeStyle = isSel ? "rgba(242,169,74,0.9)" : "rgba(255,255,255,0.28)";
     ctx.lineWidth = Math.max(1, cv.width * 0.0009);
@@ -58,13 +68,13 @@ export function drawRevisaoGroupMarkers(
 
     const scale = page.markScale === undefined ? 1 : page.markScale;
 
-    if (m.tipo === "texto") {
+    if (src.tipo === "texto") {
       const w = ((group.textW || 19) / page.widthMm) * cv.width;
       const h = ((group.textH || 5) / page.heightMm) * cv.height;
       const xpx = ((group.textX || 184) / page.widthMm) * cv.width;
       const ypx = y + ((group.textYOffset || 0) / page.heightMm) * cv.height;
       ctx.save();
-      ctx.strokeStyle = badgeColor;
+      ctx.strokeStyle = boxColor;
       ctx.lineWidth = Math.max(2, cv.width * 0.0026);
       if (!page.hideMarkBox) ctx.strokeRect(xpx - w / 2, ypx - h / 2, w, h);
       if (isSel) {
@@ -84,7 +94,7 @@ export function drawRevisaoGroupMarkers(
     } else {
       const w = ((group.colW || 7) / page.widthMm) * cv.width;
       const h = ((group.colH || 6.3) / page.heightMm) * cv.height;
-      const resposta = m.resposta || "1";
+      const resposta = src.resposta || "1";
       const colColors: Record<string, string> = { "1": "#33d17a", "2": "#ff5252", "0": "#4d9eff" };
       (
         [

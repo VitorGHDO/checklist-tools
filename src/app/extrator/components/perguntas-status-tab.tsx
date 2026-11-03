@@ -18,10 +18,12 @@ import {
   buildPlanoDbRows,
   buildPlanoSql,
   opcoesDaRevisao,
+  paginaInicialDe,
   planoConfigPadrao,
   type PlanoManutencaoConfig,
 } from "@/lib/extrator/plano-manutencao";
 import { linhasComContagemErrada, paraMysql } from "@/lib/extrator/formato-db";
+import { perguntasStatus0 } from "@/lib/extrator/campos-essenciais";
 
 interface WorkingGroup {
   id: string;
@@ -384,19 +386,15 @@ export function buildAssociation(
   return [...result, ...unassigned];
 }
 
-function buildDbRows(perguntas: PerguntaAssociada[], checklistId: string): string {
+/** Uma linha do Formato DB de checklist_perguntas (34 colunas), com o status dado. */
+export function linhaDbPergunta(p: PerguntaAssociada, checklistId: string, status: number): string {
   const id = parseInt(checklistId || "217");
   const q = (val: string | number | null) => {
     if (val === null) return '"[NULL]"';
     return `"${String(val).replace(/"/g, '""')}"`;
   };
-  const assigned = perguntas
-    .filter((p) => p.statusIdx >= 0)
-    .sort((a, b) => a.statusIdx !== b.statusIdx ? a.statusIdx - b.statusIdx : a.ordem - b.ordem);
-  return assigned
-    .map((p) =>
-      [
-        q(id), q(p.statusIdx + 1), q(p.campo), q(p.pergunta), q(p.tipo),
+  return [
+        q(id), q(status), q(p.campo), q(p.pergunta), q(p.tipo),
         q(p.opcoes), q(p.valor), q(p.obrigatorio), q(p.defaultVal), q(p.query),
         q(p.ordem), q(p.tamanho), q(p.selecione), q(p.classCor), q(p.grupo),
         q(p.ordemGrupo), q(p.titulo), q(p.tamanhoGrupo), q(p.boasvindas),
@@ -405,9 +403,46 @@ function buildDbRows(perguntas: PerguntaAssociada[], checklistId: string): strin
         q(p.tamanhoCampo), q(p.perguntaObrigatorio), q(p.valorObrigatorio),
         q(p.esconderPerguntas), q(p.esconderQuando), q(p.perguntaEsconderQuando),
         q(p.desativado),
-      ].join("\t")
-    )
+      ].join("\t");
+}
+
+function buildDbRows(perguntas: PerguntaAssociada[], checklistId: string): string {
+  return perguntas
+    .filter((p) => p.statusIdx >= 0)
+    .sort((a, b) => a.statusIdx !== b.statusIdx ? a.statusIdx - b.statusIdx : a.ordem - b.ordem)
+    .map((p) => linhaDbPergunta(p, checklistId, p.statusIdx + 1))
     .join("\n");
+}
+
+/**
+ * Perguntas do status 0 ("Dados do Veículo e Cliente") do tipo, como linhas completas:
+ * campo, tipo, pergunta, opções e valor como estão no banco (campos-essenciais.ts). Só o
+ * obrigatório é inferido — o SQL avisa.
+ */
+export function perguntasEssenciais(checklistType: ChecklistType): PerguntaAssociada[] {
+  return perguntasStatus0(checklistType).map((e, i) => ({
+    ...makeDefaults(e.campo, e.pergunta, -1, i + 1, "dados_veiculo_cliente", "Dados do Veículo e Cliente", 1, `s0-${i}`, checklistType),
+    tipo: e.tipo,
+    opcoes: e.opcoes,
+    valor: e.valor,
+    obrigatorio: e.obrigatorio,
+    defaultVal: null,
+    classCor: "",
+    foto: 0,
+    video: 0,
+    esconderPerguntas: 0,
+    esconderQuando: null,
+    perguntaEsconderQuando: null,
+  }));
+}
+
+/** Comentário de SQL com o que precisa de revisão nas perguntas essenciais. */
+function revisarEssenciais(checklistType: ChecklistType): string[] {
+  const obrig = perguntasStatus0(checklistType).filter((e) => e.obrigatorio).length;
+  return [
+    "-- Status 0 (Dados do Veículo e Cliente): campo, tipo, pergunta, opções e valor do modelo de referência.",
+    `-- Obrigatório inferido: ${obrig} pergunta(s) visíveis como obrigatórias, hidden como não — conferir.`,
+  ];
 }
 
 function buildSqlInsert(p: PerguntaAssociada, checklistId: string): string {
@@ -783,6 +818,8 @@ interface PerguntaCardProps {
   onMoveDown: () => void;
   onChangeStatus: (statusIdx: number) => void;
   checklistType: ChecklistType;
+  /** Número exibido do 1º status — no plano, a página inicial da config. */
+  numeroBase?: number;
 }
 
 function PerguntaCard({
@@ -797,6 +834,7 @@ function PerguntaCard({
   onMoveDown,
   onChangeStatus,
   checklistType,
+  numeroBase = 1,
 }: PerguntaCardProps) {
   const isCompacto = p.esconderQuando === "2";
   const hasOpcoes = ["radio", "select"].includes(p.tipo);
@@ -984,7 +1022,7 @@ function PerguntaCard({
             >
               <option value={-1}>— Não associada —</option>
               {allGroups.map((g, i) => (
-                <option key={i} value={i}>{i + 1}. {g.baseLabel}</option>
+                <option key={i} value={i}>{i + numeroBase}. {g.baseLabel}</option>
               ))}
             </select>
           </div>
@@ -1010,6 +1048,7 @@ interface GroupSectionProps {
   firstTitulo: string;
   firstOrdemGrupo: number;
   checklistType: ChecklistType;
+  numeroBase?: number;
 }
 
 function GroupSection({
@@ -1028,6 +1067,7 @@ function GroupSection({
   firstTitulo,
   firstOrdemGrupo,
   checklistType,
+  numeroBase = 1,
 }: GroupSectionProps) {
   const [collapsed, setCollapsed] = useState(true);
   const compactoCount = perguntas.filter((p) => p.esconderQuando === "2").length;
@@ -1044,7 +1084,7 @@ function GroupSection({
             <ChevronDown className={`w-4 h-4 transition-transform ${collapsed ? "" : "rotate-180"}`} />
           </button>
           <span className="w-6 h-6 rounded-full bg-[#8950FC] text-white text-xs flex items-center justify-center font-bold flex-shrink-0">
-            {statusIdx + 1}
+            {statusIdx + numeroBase}
           </span>
           <span className="text-sm font-semibold text-[#464E5F] flex-1 truncate">{group.baseLabel}</span>
           <span className="text-xs text-[#80808F] flex-shrink-0">{perguntas.length} pergunta{perguntas.length !== 1 ? "s" : ""}</span>
@@ -1109,6 +1149,7 @@ function GroupSection({
                 onMoveDown={() => onMoveDown(p.id)}
                 onChangeStatus={(idx2) => onChangeStatus(p.id, idx2)}
                 checklistType={checklistType}
+                numeroBase={numeroBase}
               />
             ))
           )}
@@ -1146,6 +1187,9 @@ export function PerguntasStatusTab({
   const [showDb, setShowDb] = useState(false);
   const [dbOutput, setDbOutput] = useState("");
   const [dbFormato, setDbFormato] = useState<"planilha" | "mysql">("planilha");
+  // Perguntas do status 0 (Dados do Veículo e Cliente) junto com as da folha. Ligado por
+  // padrão: sem elas o checklist novo não tem a tela de dados.
+  const [incluirEssenciais, setIncluirEssenciais] = useState(true);
   const [showSql, setShowSql] = useState(false);
   const [sqlOutput, setSqlOutput] = useState("");
 
@@ -1207,13 +1251,16 @@ export function PerguntasStatusTab({
    * vazia para o id auto_increment.
    */
   function gerarDb(formato: "planilha" | "mysql") {
-    const planilha = isPlano
-      ? buildPlanoDbRows(perguntas, planoEfetivo())
+    const essenciais = incluirEssenciais ? perguntasEssenciais(checklistType) : [];
+    const status0 = isPlano ? [] : essenciais.map((p) => linhaDbPergunta(p, checklistId, 0));
+    const corpo = isPlano
+      ? buildPlanoDbRows(perguntas, planoEfetivo(), essenciais)
       : checklistType === "revisao-entrega"
       ? buildRevisaoEntregaDbRows(perguntas, checklistId, groups)
       : checklistType === "inspecao-pre-entrega"
       ? buildInspecaoPreEntregaDbRows(perguntas, checklistId, groups)
       : buildDbRows(perguntas, checklistId);
+    const planilha = [...status0, corpo].filter(Boolean).join("\n");
     if (formato === "mysql") {
       // O INSERT é posicional: uma linha com coluna a mais ou a menos só estoura no
       // banco, e aí achar a pergunta culpada no meio de centenas é o trabalho chato.
@@ -1329,19 +1376,25 @@ export function PerguntasStatusTab({
   }
 
   function generateSql() {
+    const essenciais = incluirEssenciais ? perguntasEssenciais(checklistType) : [];
     if (isPlano) {
-      setSqlOutput(buildPlanoSql(perguntas, planoEfetivo()));
+      const revisar = essenciais.length ? revisarEssenciais(checklistType).join("\n") + "\n" : "";
+      setSqlOutput(revisar + buildPlanoSql(perguntas, planoEfetivo(), essenciais));
       setShowSql(true);
       return;
     }
+    // status 0 vai na frente, nos mesmos INSERTs de checklist_perguntas
+    const status0 = essenciais.length
+      ? [...revisarEssenciais(checklistType), ...essenciais.map((p) => buildSqlInsert(p, checklistId)), ""].join("\n") + "\n"
+      : "";
     if (checklistType === "revisao-entrega") {
-      setSqlOutput(buildRevisaoEntregaSql(perguntas, checklistId, groups));
+      setSqlOutput(status0 + buildRevisaoEntregaSql(perguntas, checklistId, groups));
       setShowSql(true);
       return;
     }
 
     if (checklistType === "inspecao-pre-entrega") {
-      setSqlOutput(buildInspecaoPreEntregaSql(perguntas, checklistId, groups));
+      setSqlOutput(status0 + buildInspecaoPreEntregaSql(perguntas, checklistId, groups));
       setShowSql(true);
       return;
     }
@@ -1372,7 +1425,7 @@ export function PerguntasStatusTab({
     });
 
     const sql = lines.join("\n");
-    setSqlOutput(sql);
+    setSqlOutput(status0 + sql);
     setShowSql(true);
   }
 
@@ -1425,6 +1478,17 @@ export function PerguntasStatusTab({
                 value={plano.botaoPagina}
                 onChange={(e) => setPlanoField("botaoPagina", e.target.value)}
                 className={`${planoNum} w-full`}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className={planoLbl}>status inicial</span>
+              <input
+                type="number"
+                min={1}
+                value={paginaInicialDe(plano)}
+                onChange={(e) => setPlanoField("paginaInicial", parseInt(e.target.value, 10) || 1)}
+                title="Coluna `pagina` do 1º grupo de itens — os grupos seguintes continuam a contagem. A pergunta da revisão fica sempre na página 1."
+                className={`${planoNum} w-full font-mono`}
               />
             </label>
             <label className="space-y-1">
@@ -1530,6 +1594,15 @@ export function PerguntasStatusTab({
           )}
         </div>
         <div className="flex items-center gap-2">
+          {perguntasStatus0(checklistType).length > 0 && (
+            <label
+              className="flex items-center gap-1.5 text-xs text-[#464E5F] cursor-pointer"
+              title="Inclui no banco as perguntas da tela Dados do Veículo e Cliente (status 0) deste modelo. Campos e tipos vêm do banco; o texto das perguntas é padrão e select/radio saem sem opções — o SQL marca o que revisar."
+            >
+              <input type="checkbox" checked={incluirEssenciais} onChange={(e) => setIncluirEssenciais(e.target.checked)} />
+              campos essenciais ({perguntasStatus0(checklistType).length})
+            </label>
+          )}
           {!isPlano && (
             // A 2ª coluna de toda linha gerada aqui. Ficava só na aba Status / Seções, o
             // que obrigava a trocar de aba antes de gerar o banco.
@@ -1603,6 +1676,7 @@ export function PerguntasStatusTab({
             firstTitulo={first?.titulo ?? group.baseLabel}
             firstOrdemGrupo={first?.ordemGrupo ?? gIdx + 1}
             checklistType={checklistType}
+            numeroBase={isPlano ? paginaInicialDe(plano) : 1}
           />
         );
       })}

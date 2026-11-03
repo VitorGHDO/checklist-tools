@@ -9,7 +9,7 @@ import {
   syncGroupStartIfFirst,
 } from "@/lib/designer/geometry";
 import { insertMirrorRow, mirrorTargetIndex, removeMirrorRow, supportsMirror } from "@/lib/designer/mirror";
-import { mascaraDoItem } from "@/lib/designer/manutencao";
+import { mascaraDoItem, usaImagens } from "@/lib/designer/manutencao";
 import type {
   DesignerGroup,
   DesignerPage,
@@ -208,7 +208,14 @@ export function MarkerRow({
           })
         ) : isManutencao ? (
           (
-            [
+            (usaImagens(manutencaoCfg)
+              ? // Imagens antigas: as três respostas do formulário desses planos.
+                [
+                  ["1", "●", "OK — imprime bola.jpg", "bg-[#0BB783] text-white border-[#0BB783]"],
+                  ["2", "▲", "Atenção — imprime triangulo.jpg", "bg-[#FFB822] text-white border-[#FFB822]"],
+                  ["3", "✕", "Substituir — imprime x.jpg", "bg-[#F64E60] text-white border-[#F64E60]"],
+                ]
+              : [
               ["1", "✓", "OK — imprime ✓", "bg-[#0BB783] text-white border-[#0BB783]"],
               ["3", "✕", "Substituir — imprime X", "bg-[#F64E60] text-white border-[#F64E60]"],
               // O triângulo saiu do formulário (só há OK e Substituir); o botão só aparece
@@ -221,7 +228,7 @@ export function MarkerRow({
                     string,
                   ][])
                 : []),
-            ] as [string, string, string, string][]
+            ]) as [string, string, string, string][]
           ).map(([val, glyph, titulo, onClass]) => {
             const active = (m.type || "1") === val;
             return (

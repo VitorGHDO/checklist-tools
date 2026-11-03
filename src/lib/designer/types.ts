@@ -119,8 +119,14 @@ export interface ManutencaoConfig {
   /** Caminho PHP dos fundos; `{n}` é trocado pelo número da folha. Vazio = não
    *  declara os $fundoBg no arquivo (eles chegam por parâmetro). */
   fundoPath: string;
-  // A marcação é sempre glifo (✓/▲/X em dejavusans), como no modelo — a variante com
-  // JPGs ($img_bola/$img_triangulo/$img_x) saiu porque nenhum plano a usa.
+  /** Como a marcação é impressa:
+   *  - "glifo" (padrão): ✓/X escritos em dejavusans, como o modelo Commander DS 2025;
+   *  - "imagem": os JPGs da pasta marcacoes ($img_bola/$img_triangulo/$img_x), como os
+   *    planos antigos (Commander 2025) — bola verde, triângulo amarelo, X vermelho.
+   *    As imagens chegam por parâmetro depois dos $fundoBg. */
+  marcacao?: "glifo" | "imagem";
+  /** Pasta dos JPGs de marcação, como expressão PHP. Só sai no formato "completo". */
+  marcacoesPath?: string;
   /** O que o arquivo gerado contém:
    *  - "funcao": só gerarDesenho e gerarImpressao, como o modelo — quem declara os
    *    $fundoBg é a página do PDF;
@@ -130,8 +136,11 @@ export interface ManutencaoConfig {
   varResposta?: string;
   /** gerarImpressao busca o nomeFantasia da concessionária antes de desenhar. */
   buscarNomeFantasia: boolean;
-  /** Lado (mm) do quadrado que representa a marcação no canvas. Não vai para o PHP:
-   *  o glifo é impresso por um writeHTMLCell de tamanho fixo. */
+  /** Campo local e campo de data do cabeçalho/rodapé saem numa célula só:
+   *  "<local>( d/m/y H:i)". Ausente = ligado. */
+  localEData?: boolean;
+  /** Lado (mm) do quadrado que representa a marcação no canvas. No modo "glifo" não vai
+   *  para o PHP (writeHTMLCell de tamanho fixo); no modo "imagem" é o tamanho do Image(). */
   iconMm: number;
   /** Já converteu o antigo "item sem máscara = impresso em todas" em máscara cheia?
    *  Depois disso, item sem máscara é item sem nenhuma revisão marcada. */
@@ -328,6 +337,15 @@ export type CaptureMode =
   | { kind: "formularioColX"; colunaId: string }
   | { kind: "posvendaOptX"; groupId: string; valor: string }
   | { kind: "headerPoint"; fieldId: string; pointKey: string }
+  /** Medição das linhas na arte: dois cliques, os cantos da faixa das colunas de
+   *  marcação. `canto` (mm) guarda o primeiro enquanto espera o segundo. */
+  | { kind: "medirLinhas"; groupId: string; canto?: { x: number; y: number } }
+  /** Medição das colunas: dois cliques em volta da linha de rótulos (ou de caixinhas). */
+  | {
+      kind: "medirColunas";
+      alvo: { alvo: "grupo"; groupId: string } | { alvo: "plano" } | { alvo: "formulario" };
+      canto?: { x: number; y: number };
+    }
   | null;
 
 export interface EditorState {

@@ -89,13 +89,25 @@ export function restackSheets(
 
     page.groups.forEach((g) => {
       const inc = incOf(g);
+      const antes = g.yStart;
       // arrastado no canvas: respeita a posição onde foi solto
       if (g.yManual) cursorY = g.yStart;
       else g.yStart = +cursorY.toFixed(2);
-      g.markers.forEach((m, k) => {
-        m.fy = clamp01((g.yStart + k * inc) / page.heightMm);
-      });
-      const last = g.yStart + Math.max(0, g.markers.length - 1) * inc;
+      if (g.markersManual) {
+        // Espaçamento medido na arte (ou ajustado à mão): anda em bloco, nunca é
+        // reescrito pelo incremento — era isso que desfazia o "mapear folha" ao mover
+        // um grupo de folha.
+        const dFy = (g.yStart - antes) / page.heightMm;
+        if (dFy) g.markers.forEach((m) => (m.fy = clamp01(m.fy + dFy)));
+      } else {
+        g.markers.forEach((m, k) => {
+          m.fy = clamp01((g.yStart + k * inc) / page.heightMm);
+        });
+      }
+      const ultimo = g.markers[g.markers.length - 1];
+      const last = g.markersManual && ultimo
+        ? ultimo.fy * page.heightMm
+        : g.yStart + Math.max(0, g.markers.length - 1) * inc;
       if (g.markers.length) endY = Math.max(endY, last);
       markers += g.markers.length;
       cursorY = last + gap(inc);
@@ -193,8 +205,13 @@ export function moveGroupsToSheet(
 
   // coleta na ordem global atual (folha por folha), para não inverter a sequência
   const picked: DesignerGroup[] = [];
+  const jaNaDestino = new Set<DesignerGroup>();
   for (const p of sheets) {
-    for (const g of p.groups) if (groupIds.includes(g.id)) picked.push(g);
+    for (const g of p.groups) {
+      if (!groupIds.includes(g.id)) continue;
+      picked.push(g);
+      if (p === target) jaNaDestino.add(g);
+    }
   }
   if (!picked.length) return { moved: 0, target };
 
@@ -205,11 +222,47 @@ export function moveGroupsToSheet(
     }
   }
   picked.forEach((g) => {
+    if (jaNaDestino.has(g)) return;
     g.yManual = false; // volta a empilhar na sequência da folha destino
-    target.groups.push(g);
+    // O que foi medido valia para a folha de origem; na destino o grupo ainda não tem
+    // medida, então volta ao passo regular até ser mapeado lá.
+    delete g.markersManual;
   });
+  // Continuação ("… (cont.)") é o começo da folha seguinte: vai para o topo, na
+  // ordem; o resto entra no fim.
+  const continuacoes = picked.filter((g) => isContTitle(g.title));
+  const demais = picked.filter((g) => !isContTitle(g.title));
+  target.groups = [...continuacoes, ...target.groups, ...demais];
   target.activeGroupId = picked[0].id;
   return { moved: picked.length, target };
+}
+
+/**
+ * Arrastar e soltar na sidebar: põe o grupo na posição `indice` da folha `destino`
+ * (índice contado depois de tirá-lo da origem). Trocando de folha, a medida da origem
+ * deixa de valer; na mesma folha, só muda a ordem e a medida fica.
+ */
+export function moverGrupoPara(
+  pages: DesignerPage[],
+  docType: DesignerDocType,
+  groupId: string,
+  destino: DesignerPage,
+  indice: number,
+): { origem: DesignerPage; trocouFolha: boolean } | null {
+  const origem = checklistSheets(pages, docType).find((p) => p.groups.some((g) => g.id === groupId));
+  const grupo = origem?.groups.find((g) => g.id === groupId);
+  if (!origem || !grupo) return null;
+  origem.groups = origem.groups.filter((g) => g !== grupo);
+  const pos = Math.max(0, Math.min(indice, destino.groups.length));
+  destino.groups = [...destino.groups.slice(0, pos), grupo, ...destino.groups.slice(pos)];
+  const trocouFolha = origem !== destino;
+  if (trocouFolha) {
+    grupo.yManual = false;
+    delete grupo.markersManual;
+    if (origem.activeGroupId === grupo.id) origem.activeGroupId = origem.groups[0]?.id ?? null;
+  }
+  destino.activeGroupId = grupo.id;
+  return { origem, trocouFolha };
 }
 
 /** Junta o grupo com o anterior da MESMA folha (desfaz uma partição feita ali). */

@@ -1,18 +1,20 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Crosshair, Eye, Grid3x3, Layers, Plus, Wand2, X } from "lucide-react";
+import { Crosshair, Eye, Grid3x3, Layers, Plus, ScanLine, Wand2, X } from "lucide-react";
 import { showToast } from "@/components/ui/toast";
 import { genId } from "@/lib/designer/model";
 import {
   colunaLabel,
   contarUsos,
   gerarColunas,
+  MARCACOES_PATH_PADRAO,
   passoDaColuna,
   removerColuna,
   removerCondicao,
+  usaImagens,
 } from "@/lib/designer/manutencao";
-import { nomeFuncao } from "@/lib/designer/export-manutencao";
+import { IMGS_PARAMETRO, nomeFuncao } from "@/lib/designer/export-manutencao";
 import type { CaptureMode, EditorState, ManutencaoConfig } from "@/lib/designer/types";
 
 interface Props {
@@ -102,9 +104,11 @@ export function ManutencaoPanel({ st, cfg, rerender, commit, onAbrirGrade }: Pro
     (p) => p.kind === "checklist" && p.docType === "manutencao",
   ).length;
   const varRespostaLabel = "$" + (cfg.varResposta || "resposta_formulario").replace(/^\$/, "");
-  const assinaturaExtras = Array.from({ length: folhasDoPlano }, (_, i) =>
-    i === 0 ? "$fundoBg" : `$fundoBg${i + 1}`,
-  ).join(", ");
+  const imagens = usaImagens(cfg);
+  const assinaturaExtras = [
+    ...Array.from({ length: folhasDoPlano }, (_, i) => (i === 0 ? "$fundoBg" : `$fundoBg${i + 1}`)),
+    ...(imagens ? IMGS_PARAMETRO : []),
+  ].join(", ");
 
   function capturarX(colunaId: string) {
     st.captureMode = { kind: "manutencaoColX", colunaId } as CaptureMode;
@@ -230,6 +234,18 @@ export function ManutencaoPanel({ st, cfg, rerender, commit, onAbrirGrade }: Pro
             </span>
           </div>
 
+          <button
+            onClick={() => {
+              st.captureMode = { kind: "medirColunas", alvo: { alvo: "plano" } };
+              commit();
+              showToast("Clique em dois cantos da linha 1ª 2ª 3ª… da folha.", "info");
+            }}
+            title="Lê na folha o centro de cada revisão pela linha de rótulos (1ª, 2ª…) e grava o X de todas de uma vez. Tarja escura com texto branco é detectada sozinha."
+            className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg bg-[#173872]/10 hover:bg-[#173872]/20 border border-[#173872]/30 text-[#173872] text-[11px] font-medium"
+          >
+            <ScanLine className="w-3.5 h-3.5 rotate-90" />
+            medir colunas na folha
+          </button>
           <div className="space-y-1">
             {cfg.colunas.map((col, i) => {
               const atual = cfg.previewColunaId === col.id;
@@ -451,6 +467,41 @@ export function ManutencaoPanel({ st, cfg, rerender, commit, onAbrirGrade }: Pro
                 : "As mesmas funções, mais os $fundoBg/$img_* declarados no topo do arquivo."}
             </span>
           </label>
+          <label className="block space-y-1">
+            <span className={lbl}>marcação</span>
+            <select
+              value={cfg.marcacao ?? "glifo"}
+              onChange={(e) => {
+                cfg.marcacao = e.target.value as "glifo" | "imagem";
+                commit();
+              }}
+              className={`${num} w-full`}
+              title="Como a resposta é impressa na folha"
+            >
+              <option value="glifo">✓ / X (glifo, como o modelo)</option>
+              <option value="imagem">bola / triângulo / X (imagens antigas)</option>
+            </select>
+            <span className="block text-[10px] text-[#80808F] leading-snug">
+              {imagens
+                ? "Image() com bola.jpg (1), triangulo.jpg (2) e x.jpg (3) da pasta marcacoes, no tamanho da marca (mm). $img_x, $img_bola e $img_triangulo entram como parâmetros depois dos fundos."
+                : "writeHTMLCell com ✓ (1) e X (3) em dejavusans."}
+            </span>
+          </label>
+          {imagens && !soFuncao && (
+            <label className="block space-y-1">
+              <span className={lbl}>pasta das marcações</span>
+              <input
+                defaultValue={cfg.marcacoesPath || MARCACOES_PATH_PADRAO}
+                key={"mpath" + st.geomTick}
+                onChange={(e) => {
+                  cfg.marcacoesPath = e.target.value;
+                  rerender();
+                }}
+                title="Expressão PHP da pasta com bola.jpg, triangulo.jpg e x.jpg"
+                className={`${num} w-full font-mono`}
+              />
+            </label>
+          )}
           {(
             [
               ["sufixoFuncao", "sufixo", "gerarDesenho<sufixo> / gerarImpressao<sufixo>"],
@@ -490,7 +541,11 @@ export function ManutencaoPanel({ st, cfg, rerender, commit, onAbrirGrade }: Pro
                 rerender();
               }}
               className={`${num} w-16`}
-              title="Tamanho do quadrado que representa a marcação no canvas. O PHP imprime o glifo ✓/X, que não depende deste valor."
+              title={
+                imagens
+                  ? "Lado da imagem impressa (Image largura × altura) e do quadrado no canvas."
+                  : "Tamanho do quadrado que representa a marcação no canvas. O PHP imprime o glifo ✓/X, que não depende deste valor."
+              }
             />
           </label>
 
@@ -507,6 +562,25 @@ export function ManutencaoPanel({ st, cfg, rerender, commit, onAbrirGrade }: Pro
             <span>
               buscar <code className="font-mono">nomeFantasia</code> da concessionária na função de
               impressão
+            </span>
+          </label>
+
+          <label className="flex items-start gap-2 text-[11px] text-[#464E5F] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={cfg.localEData !== false}
+              onChange={(e) => {
+                cfg.localEData = e.target.checked;
+                commit();
+              }}
+              className="mt-0.5"
+            />
+            <span>
+              local e data numa célula só no cabeçalho/rodapé:{" "}
+              <code className="font-mono">$local . &apos;(&apos; . $data_formatada . &apos;)&apos;</code>, data em{" "}
+              <code className="font-mono">d/m/y H:i</code>. O campo{" "}
+              <code className="font-mono">local</code>/<code className="font-mono">nomeFantasia</code> e o
+              campo de data viram um bloco só, na posição do primeiro dos dois.
             </span>
           </label>
 

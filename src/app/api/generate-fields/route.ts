@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
+import { expandirEstrutura, parseEstrutura } from "@/lib/extrator/pos-venda";
+import { renderizarPaginas } from "@/lib/extrator/render-paginas";
 import type { AIProvider } from "@/lib/types";
 
 const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"];
@@ -84,10 +86,83 @@ const PLANO_EXTRA_RULES = `
   esses itens gere DOIS campos, na ordem km primeiro e tempo depois:
   "Fluido de freio" com sub-linhas Km e Meses → "fluido_de_freio_km" e "fluido_de_freio_tempo"
 - A pergunta de cada um repete o texto do item com o sufixo " (KM)" e " (Tempo)"
-- Itens com uma única linha continuam gerando UM campo só, sem sufixo
+- O texto pode trazer a escala do item entre colchetes no fim da linha. Remova o
+  marcador da pergunta e gere os campos conforme ele:
+  "[por km e por tempo]" → dois campos, "<campo>_km" e "<campo>_tempo", como acima
+  "[por km]" → UM campo "<campo>_km", pergunta com o sufixo " (KM)"
+  "[por tempo]" → UM campo "<campo>_tempo", pergunta com o sufixo " (Tempo)"
+- Itens com uma única linha e sem marcador continuam gerando UM campo só, sem sufixo
+- As seções são os rótulos em MAIÚSCULAS da posição do veículo (ex.: "SOLO", "MEIA
+  ALTURA", "ALTURA MÁXIMA"). O mesmo rótulo pode aparecer duas vezes: mantenha as duas
+  seções separadas, na ordem do texto — não junte os itens do segundo bloco no primeiro
 - IGNORE por completo o bloco "NOTAS" do rodapé da folha e tudo que vem depois dele: são
   observações do plano ("(1) Itens que devem ser substituídos...", "(2) Para veículos..."),
   não itens do checklist. Não gere campo nem seção para nada desse bloco.`;
+
+/**
+ * Pós-venda tem prompt PRÓPRIO, não regras extras: a saída não é a lista plana de seções
+ * dos outros tipos, e sim {colunas, secoes} — a IA declara as colunas de etapa uma vez e
+ * o servidor expande. Ver lib/extrator/pos-venda.ts.
+ */
+const POSVENDA_PROMPT_BODY = `Você receberá a IMAGEM de uma folha de checklist de pós-venda (inspeção/conferência de veículo) e, como apoio, o texto extraído dela.
+
+A ESTRUTURA VEM DA IMAGEM, NÃO DO TEXTO.
+O texto extraído destas folhas é inconfiável e você não deve se guiar por ele:
+- os rótulos dos blocos são impressos na VERTICAL (girados 90 graus) e o OCR os quebra em fragmentos soltos no meio das linhas (um "É", um "Q |", um "3 |" perdidos antes do nome do item);
+- a folha costuma ter DUAS tabelas lado a lado, e o OCR funde a linha da esquerda com a da direita numa linha só;
+- as caixas de marcação viram lixo ("C[) NC N/A", "CLINC[])NA[]").
+Use o texto apenas para conferir a grafia dos itens. Todo o resto — quais blocos existem, que itens pertencem a cada bloco, quantas colunas de marcação há — você lê na imagem.
+
+COLUNAS DE ETAPA:
+Nestas folhas o MESMO item é cobrado em mais de uma coluna da tabela (ex.: "ENTRADA" e "SAÍDA"; ou "RECEPÇÃO", "MECÂNICO" e "ENTREGA"), cada uma com a sua marcação na linha.
+NÃO repita o item uma vez por coluna. Declare as colunas UMA ÚNICA VEZ em "colunas" e marque a seção com "repete": true — o sistema expande sozinho, na ordem em que você declarar. Declare as colunas na ordem de preenchimento impressa na folha.
+
+SEÇÕES:
+São os blocos da tabela, identificados pelo rótulo ao lado de cada um (quase sempre na vertical). Exemplos reais: DIANTEIRA, TRASEIRA, LATERAL LE, LATERAL LD, INTERIOR DO VEÍCULO, ITENS ESPECÍFICOS. Copie o rótulo como ele aparece na imagem.
+
+SEÇÃO QUE NÃO SE REPETE:
+Blocos que TÊM marcação própria mas são cobrados uma vez só (acessórios/equipamentos com SIM-NÃO, estado dos pneus com B-M-R) levam "repete": false. Quando o bloco pertence claramente a uma das etapas, informe "coluna" com o sufixo dela; se não pertencer a nenhuma em especial, use "coluna": null.
+
+NOME DO CAMPO (snake_case):
+- apenas letras minúsculas, números e underscore
+- no máximo 4 palavras, resumindo a essência do item
+- NÃO inclua o sufixo da etapa: quem acrescenta é o sistema
+- ITEM QUE APARECE EM DUAS SEÇÕES: quando o mesmo texto existe em dois blocos (ex.: "Retrovisores" em LATERAL LE e em LATERAL LD), diferencie pelo sufixo do bloco — "retrovisores_le" e "retrovisores_ld". Nome repetido vira coluna duplicada e derruba a migration.
+
+REGRA DE CORTE — SÓ ENTRA O QUE TEM CAIXA DE MARCAÇÃO:
+Item de checklist tem uma CAIXA para marcar: o quadradinho de C/NC/N-A, de SIM/NÃO, de B/M/R. Campo de preenchimento tem uma LINHA para escrever em cima, e NÃO é item de checklist.
+NÃO gere campo para nada que se preencha escrevendo, mesmo quando o bloco tem título próprio e parece uma seção:
+- cabeçalho do documento: Usuário, Telefone, Placa, Modelo, E-mail, Veículo, Tag, Km, Motorista, Data da retirada, Oficina, Hr, Local de retirada, Local de entrega
+- blocos de dados no meio ou no rodapé da folha, ainda que tenham título em caixa alta: Km, Data, Hora, Titular da placa, Matrícula, Observações, Relato resumido do serviço realizado
+- assinaturas, matrículas e responsáveis
+Também ignore:
+- legendas e instruções ("Legenda - ( C ) Conforme...", "Em caso de não conforme, informar...")
+- o croqui de avarias e os medidores de combustível: são desenhos, não itens de lista
+Na dúvida, olhe a imagem: linha sem quadradinho não vira campo.`;
+
+const POSVENDA_FORMATO = `
+
+FORMATO DE SAÍDA:
+Retorne APENAS um JSON válido, sem explicações e sem markdown:
+{
+  "colunas": [
+    {"sufixo": "entrada", "label": "Entrada"},
+    {"sufixo": "saida", "label": "Saída"}
+  ],
+  "secoes": [
+    {"secao": "DIANTEIRA", "repete": true, "coluna": null, "itens": [
+      {"campo": "farois_faroletes_setas", "pergunta": "Faróis / faroletes / setas"}
+    ]},
+    {"secao": "ACESSÓRIOS / EQUIPAMENTOS EXISTENTES", "repete": false, "coluna": "entrada", "itens": [
+      {"campo": "engate_reboque", "pergunta": "Engate Reboque"}
+    ]}
+  ]
+}`;
+
+/** Folha de pós-venda: estrutura lida da imagem, com colunas de etapa. */
+function isPosVenda(checklistType?: string): boolean {
+  return checklistType === "pos-venda-inspecao";
+}
 
 function extraRules(checklistType?: string): string {
   if (checklistType === "inspecao-pre-entrega") return IPE_EXTRA_RULES;
@@ -96,6 +171,7 @@ function extraRules(checklistType?: string): string {
 }
 
 function buildSystemPrompt(checklistType?: string): string {
+  if (isPosVenda(checklistType)) return POSVENDA_PROMPT_BODY + POSVENDA_FORMATO;
   const extra = extraRules(checklistType);
   return BASE_PROMPT_BODY + extra + `
 
@@ -110,6 +186,8 @@ Retorne APENAS um JSON válido (array), sem explicações, sem markdown, sem có
 }
 
 function buildOpenAISystemPrompt(checklistType?: string): string {
+  // O formato do pós-venda já é um objeto no topo, que é o que o response_format pede.
+  if (isPosVenda(checklistType)) return POSVENDA_PROMPT_BODY + POSVENDA_FORMATO;
   const extra = extraRules(checklistType);
   return BASE_PROMPT_BODY + extra + `
 
@@ -123,11 +201,28 @@ Retorne APENAS um objeto JSON no formato {"secoes": [...]}, sem explicações ou
 ]}`;
 }
 
+/** Página da folha enviada como contexto visual. */
+interface ImagemRef {
+  mimeType: string;
+  base64: string;
+}
+
+/**
+ * No pós-venda o texto é só apoio para a grafia dos itens — dizer isso no corpo da
+ * mensagem evita que o modelo tente reconstruir a tabela a partir do OCR embaralhado.
+ */
+function rotuloDoTexto(checklistType?: string): string {
+  return isPosVenda(checklistType)
+    ? "Texto extraído da folha (APOIO, pode estar corrompido — a estrutura vem da imagem):"
+    : "Texto do checklist corrigido:";
+}
+
 async function callGemini(
   apiKey: string,
   model: string,
   text: string,
   checklistType?: string,
+  images: ImagemRef[] = [],
 ): Promise<string> {
   const genAI = new GoogleGenerativeAI(apiKey);
   const genModel = genAI.getGenerativeModel(
@@ -135,9 +230,16 @@ async function callGemini(
     { apiVersion: "v1beta" }
   );
 
-  const prompt = `${buildSystemPrompt(checklistType)}\n\nTexto do checklist corrigido:\n\n${text}\n\nRetorne o JSON agora:`;
+  const prompt = `${buildSystemPrompt(checklistType)}\n\n${rotuloDoTexto(checklistType)}\n\n${text}\n\nRetorne o JSON agora:`;
+  const parts: Array<
+    { text: string } | { inlineData: { mimeType: string; data: string } }
+  > = [{ text: prompt }];
+  for (const img of images) {
+    parts.push({ inlineData: { mimeType: img.mimeType, data: img.base64 } });
+  }
+
   const result = await genModel.generateContent({
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    contents: [{ role: "user", parts }],
     generationConfig: { maxOutputTokens: 65536 },
   });
   return result.response.text();
@@ -148,17 +250,28 @@ async function callOpenAI(
   model: string,
   text: string,
   checklistType?: string,
+  images: ImagemRef[] = [],
 ): Promise<string> {
   const openai = new OpenAI({ apiKey });
+
+  const contentParts: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
+    {
+      type: "text",
+      text: `${rotuloDoTexto(checklistType)}\n\n${text}\n\nRetorne o objeto JSON agora:`,
+    },
+  ];
+  for (const img of images) {
+    contentParts.push({
+      type: "image_url",
+      image_url: { url: `data:${img.mimeType};base64,${img.base64}`, detail: "high" },
+    });
+  }
 
   const response = await openai.chat.completions.create({
     model,
     messages: [
       { role: "system", content: buildOpenAISystemPrompt(checklistType) },
-      {
-        role: "user",
-        content: `Texto do checklist corrigido:\n\n${text}\n\nRetorne o objeto JSON {"fields": [...]} agora:`,
-      },
+      { role: "user", content: contentParts },
     ],
     max_tokens: 16384,
     temperature: 0.1,
@@ -173,8 +286,26 @@ async function callClaude(
   model: string,
   text: string,
   checklistType?: string,
+  images: ImagemRef[] = [],
 ): Promise<string> {
   const anthropic = new Anthropic({ apiKey });
+
+  const content: Anthropic.MessageParam["content"] = [
+    {
+      type: "text",
+      text: `${rotuloDoTexto(checklistType)}\n\n${text}\n\nRetorne o JSON agora:`,
+    },
+  ];
+  for (const img of images) {
+    content.push({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: img.mimeType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+        data: img.base64,
+      },
+    });
+  }
 
   // Streaming é obrigatório quando max_tokens é alto o bastante para a requisição
   // poder passar de 10 min sem stream. Acumulamos e devolvemos o texto completo.
@@ -183,12 +314,7 @@ async function callClaude(
     max_tokens: 32000,
     temperature: 0.1,
     system: buildSystemPrompt(checklistType),
-    messages: [
-      {
-        role: "user",
-        content: `Texto do checklist corrigido:\n\n${text}\n\nRetorne o JSON agora:`,
-      },
-    ],
+    messages: [{ role: "user", content }],
   });
 
   return await stream.finalText();
@@ -246,45 +372,139 @@ function flattenToFields(node: unknown, inheritedSecao: string, out: MigrationFi
   }
 }
 
-function parseFields(raw: string): { fields: MigrationField[]; truncated: boolean } {
-  // Remove markdown code fences if present
+/** JSON da resposta, tolerando cerca de markdown e corte no meio por limite de tokens. */
+function parseJsonTolerante(raw: string): { parsed: unknown; truncated: boolean } {
   const cleaned = raw
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```$/i, "")
     .trim();
 
-  let parsed: unknown;
-  let truncated = false;
   try {
-    parsed = JSON.parse(cleaned);
+    return { parsed: JSON.parse(cleaned), truncated: false };
   } catch {
-    // Recuperação para respostas truncadas
-    truncated = true;
     console.warn("JSON truncado — recuperação parcial aplicada");
     try {
-      parsed = JSON.parse(repairTruncatedJson(cleaned));
+      return { parsed: JSON.parse(repairTruncatedJson(cleaned)), truncated: true };
     } catch {
-      parsed = [];
+      return { parsed: [], truncated: true };
     }
   }
+}
 
+function parseFields(raw: string): { fields: MigrationField[]; truncated: boolean } {
+  const { parsed, truncated } = parseJsonTolerante(raw);
   const fields: MigrationField[] = [];
   flattenToFields(parsed, "", fields);
   return { fields, truncated };
 }
 
+interface PosVendaResult {
+  fields: MigrationField[];
+  truncated: boolean;
+  /** Campos renomeados por colisão de nome — a UI avisa para o usuário conferir. */
+  colisoes: { original: string; final: string }[];
+  /** Rótulos das colunas de etapa, na ordem declarada: viram os status do checklist. */
+  etapas: string[];
+}
+
+/**
+ * Pós-venda: a IA devolve {colunas, secoes} e quem multiplica os itens pelas etapas é o
+ * servidor. Estrutura irreconhecível cai no parser plano — devolver os campos sem a
+ * hierarquia ainda é melhor que devolver nada, e a UI deixa reagrupar à mão.
+ */
+function parseFieldsPosVenda(raw: string): PosVendaResult {
+  const { parsed, truncated } = parseJsonTolerante(raw);
+  const estrutura = parseEstrutura(parsed);
+  if (!estrutura) {
+    const fields: MigrationField[] = [];
+    flattenToFields(parsed, "", fields);
+    return { fields, truncated, colisoes: [], etapas: [] };
+  }
+  const { fields, colisoes } = expandirEstrutura(estrutura);
+  return { fields, truncated, colisoes, etapas: estrutura.colunas.map((c) => c.label) };
+}
+
+interface EntradaGerarCampos {
+  text: string;
+  model: string;
+  apiKey: string;
+  checklistType?: string;
+  images: ImagemRef[];
+}
+
+const MIMES_IMAGEM = ["image/png", "image/jpeg", "image/jpg", "image/webp"];
+
+/**
+ * A requisição chega como multipart quando traz as páginas renderizadas (pós-venda) e
+ * como JSON nos tipos que só mandam texto. Aceitar as duas evita migrar de uma vez todos
+ * os chamadores que já funcionam.
+ */
+async function lerEntrada(request: NextRequest): Promise<EntradaGerarCampos> {
+  const contentType = request.headers.get("content-type") || "";
+
+  if (!contentType.includes("multipart/form-data")) {
+    const body = (await request.json()) as Partial<EntradaGerarCampos>;
+    return {
+      text: body.text ?? "",
+      model: body.model || "gemini-2.5-flash",
+      apiKey: body.apiKey ?? "",
+      checklistType: body.checklistType,
+      images: [],
+    };
+  }
+
+  const fd = await request.formData();
+  const images: ImagemRef[] = [];
+  for (const [key, value] of fd.entries()) {
+    if (!key.startsWith("images") || !(value instanceof File)) continue;
+    if (!MIMES_IMAGEM.includes(value.type)) continue;
+    const buffer = Buffer.from(await value.arrayBuffer());
+    images.push({
+      mimeType: value.type === "image/jpg" ? "image/jpeg" : value.type,
+      base64: buffer.toString("base64"),
+    });
+  }
+
+  // PDF no lugar das imagens: as páginas são renderizadas aqui mesmo. Imagem explícita
+  // tem precedência — é a saída para quando existe um scan melhor que o render do PDF.
+  if (images.length === 0) {
+    const pdf = fd.get("pdf");
+    if (pdf instanceof File && pdf.size > 0) {
+      const buffer = Buffer.from(await pdf.arrayBuffer());
+      const { paginas } = await renderizarPaginas(buffer);
+      for (const p of paginas) {
+        images.push({ mimeType: p.mimeType, base64: p.base64 });
+      }
+    }
+  }
+
+  return {
+    text: (fd.get("text") as string) ?? "",
+    model: (fd.get("model") as string) || "gemini-2.5-flash",
+    apiKey: (fd.get("apiKey") as string) ?? "",
+    checklistType: (fd.get("checklistType") as string) || undefined,
+    images,
+  };
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const { text, model, apiKey, checklistType, images } = await lerEntrada(request);
 
-    const { text, model = "gemini-2.5-flash", apiKey, checklistType } = body as {
-      text: string;
-      model: string;
-      apiKey: string;
-      checklistType?: string;
-    };
+    // Pós-venda lê a estrutura da imagem; sem ela o resultado sairia do OCR embaralhado,
+    // que é exatamente o que este tipo existe para não fazer.
+    if (isPosVenda(checklistType) && images.length === 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Checklist de pós-venda precisa da folha em imagem: envie o PDF (as páginas são renderizadas aqui) ou as imagens. A estrutura é lida da imagem, não do texto.",
+        },
+        { status: 400 }
+      );
+    }
 
-    if (!text?.trim()) {
+    if (!text?.trim() && images.length === 0) {
       return NextResponse.json(
         { success: false, error: "Texto não fornecido" },
         { status: 400 }
@@ -320,11 +540,24 @@ export async function POST(request: NextRequest) {
 
     let raw: string;
     if (provider === "gemini") {
-      raw = await withRetry(() => callGemini(apiKey, model, text, checklistType));
+      raw = await withRetry(() => callGemini(apiKey, model, text, checklistType, images));
     } else if (provider === "anthropic") {
-      raw = await withRetry(() => callClaude(apiKey, model, text, checklistType));
+      raw = await withRetry(() => callClaude(apiKey, model, text, checklistType, images));
     } else {
-      raw = await withRetry(() => callOpenAI(apiKey, model, text, checklistType));
+      raw = await withRetry(() => callOpenAI(apiKey, model, text, checklistType, images));
+    }
+
+    if (isPosVenda(checklistType)) {
+      const { fields, truncated, colisoes, etapas } = parseFieldsPosVenda(raw);
+      return NextResponse.json({
+        success: true,
+        fields,
+        truncated,
+        colisoes,
+        etapas,
+        model,
+        provider,
+      });
     }
 
     const { fields, truncated } = parseFields(raw);

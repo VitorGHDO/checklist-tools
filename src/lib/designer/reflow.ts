@@ -16,8 +16,17 @@ export function checklistPagesOf(pages: DesignerPage[], docType: DesignerDocType
 
 const incOf = (g: DesignerGroup) => g.increment || DEFAULT_INC;
 
-/** Reposiciona as marcações de um grupo a partir do seu yStart, com passo constante. */
-function layoutGroup(g: DesignerGroup, page: DesignerPage): void {
+/**
+ * Reposiciona as marcações de um grupo a partir do seu yStart, com passo constante.
+ * Grupo com espaçamento medido (markersManual) anda em bloco: reescrever pelo passo
+ * desfaria o "mapear folha".
+ */
+function layoutGroup(g: DesignerGroup, page: DesignerPage, yAntes: number): void {
+  if (g.markersManual) {
+    const dFy = (g.yStart - yAntes) / page.heightMm;
+    if (dFy) g.markers.forEach((m) => (m.fy = clamp01(m.fy + dFy)));
+    return;
+  }
   const inc = incOf(g);
   g.markers.forEach((m, k) => {
     m.fy = clamp01((g.yStart + k * inc) / page.heightMm);
@@ -25,7 +34,9 @@ function layoutGroup(g: DesignerGroup, page: DesignerPage): void {
 }
 
 /** Y (mm) da última marcação do grupo — ou do próprio yStart quando está vazio. */
-function endYOf(g: DesignerGroup): number {
+function endYOf(g: DesignerGroup, page: DesignerPage): number {
+  const ultimo = g.markers[g.markers.length - 1];
+  if (g.markersManual && ultimo) return ultimo.fy * page.heightMm;
   return g.yStart + Math.max(0, g.markers.length - 1) * incOf(g);
 }
 
@@ -37,10 +48,15 @@ export function restackPage(page: DesignerPage, yTop?: number): void {
   if (!page.groups.length) return;
   let cursorY = yTop !== undefined ? yTop : page.groups[0].yStart;
   page.groups.forEach((g, gi) => {
-    g.yStart = +cursorY.toFixed(2);
-    if (gi > 0) g.yManual = false; // volta ao encadeamento automático
-    layoutGroup(g, page);
-    cursorY = endYOf(g) + GROUP_GAP_INCS * incOf(g);
+    const antes = g.yStart;
+    // Grupo medido e ancorado (mapear folha) fica onde a arte diz; os demais encadeiam.
+    if (g.markersManual && g.yManual) cursorY = g.yStart;
+    else {
+      g.yStart = +cursorY.toFixed(2);
+      if (gi > 0) g.yManual = false; // volta ao encadeamento automático
+    }
+    layoutGroup(g, page, antes);
+    cursorY = endYOf(g, page) + GROUP_GAP_INCS * incOf(g);
   });
 }
 
@@ -146,6 +162,8 @@ export function moveGroupToAdjacentPage(
   else target.groups.push(group);
 
   group.yManual = false;
+  // A medida valia para a folha de origem; na destino ele espera ser mapeado.
+  delete group.markersManual;
   if (page.activeGroupId === group.id) page.activeGroupId = page.groups[0]?.id ?? null;
   target.activeGroupId = group.id;
   restackPage(page);

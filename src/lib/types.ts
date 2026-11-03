@@ -66,7 +66,8 @@ export type ChecklistType =
   | "roteiro-entrega-tecnica"
   | "revisao-entrega"
   | "inspecao-pre-entrega"
-  | "plano-manutencao";
+  | "plano-manutencao"
+  | "pos-venda-inspecao";
 
 // ==================== Extrator — Perguntas por Status ====================
 

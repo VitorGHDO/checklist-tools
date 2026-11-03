@@ -2,7 +2,9 @@
 // (regenerateGroup/appendMissingFromQueue/reflowFromSelected/addNewGroup/importMigrationGroups).
 // Retornam contagens/resultados; os toasts ficam a cargo dos componentes.
 
-import { makeMarker, nextGenBaseMm, clamp01 } from "./geometry";
+import { makeMarker, nextGenBaseMm, clamp01, syncColumnsToAll } from "./geometry";
+import { getManutencaoConfig } from "./manutencao";
+import { getFormularioConfig } from "./formulario";
 import { applyMirrorPlan, captureMirrorPlan } from "./mirror";
 import { newGroup, newPage } from "./model";
 import { parseMigrationGroups, parseQueueNames } from "./migration-parse";
@@ -20,6 +22,134 @@ export function regenerateGroup(group: DesignerGroup, page: DesignerPage): numbe
   applyMirrorPlan(group, page, plan);
   delete group.markersManual; // layout regular de novo
   return names.length;
+}
+
+export interface ResultadoCentros {
+  /** Itens que receberam um centro medido. */
+  aplicados: number;
+  /** Itens do grupo depois da aplicação. */
+  itens: number;
+  /** Células medidas na faixa. */
+  celulas: number;
+  /** Marcadores criados a partir da fila (grupo vazio). */
+  criados: number;
+}
+
+/**
+ * Põe cada item do grupo no centro medido da sua célula, na ordem. Grupo vazio nasce da
+ * fila (ou de nomes provisórios), uma marcação por célula. Contagem diferente não é
+ * corrigida sozinha: o que sobra fica onde estava, e quem decide é quem confere.
+ *
+ * O incremento não muda — ele é replicado entre grupos, e a medição vale só para este.
+ */
+export function aplicarCentrosNoGrupo(
+  group: DesignerGroup,
+  page: DesignerPage,
+  ysMm: number[],
+): ResultadoCentros {
+  let criados = 0;
+  // Mais células que itens: completa com os nomes da fila que ainda não viraram item
+  // (remedir com um retângulo maior não pode deixar células sobrando). Grupo vazio e
+  // fila vazia ganham nomes provisórios.
+  if (group.markers.length < ysMm.length) {
+    const nomes = parseQueueNames(group.queue);
+    const usados = new Set(group.markers.map((m) => m.label));
+    const livres = nomes.filter((n) => !usados.has(n));
+    const semFila = nomes.length === 0 && group.markers.length === 0;
+    for (let i = group.markers.length, k = 0; i < ysMm.length; i++, k++) {
+      const nome = livres[k] ?? (semFila ? `campo_${i + 1}` : undefined);
+      if (!nome) break;
+      group.markers.push(makeMarker(group, page, nome, ysMm[i]));
+      criados++;
+    }
+  }
+  const aplicados = Math.min(group.markers.length, ysMm.length);
+  for (let i = 0; i < aplicados; i++) {
+    group.markers[i].fy = clamp01(ysMm[i] / page.heightMm);
+  }
+  if (aplicados > 0) {
+    group.yStart = +ysMm[0].toFixed(2);
+    group.yManual = true;
+    // Espaçamento medido, não regular: o encadeamento passa a mover o bloco inteiro.
+    group.markersManual = true;
+  }
+  return { aplicados, itens: group.markers.length, celulas: ysMm.length, criados };
+}
+
+/** Onde a medição de colunas vai parar: o X de um grupo, as revisões do plano ou as
+ *  colunas de resultado do formulário. */
+export type AlvoColunas = { alvo: "grupo"; groupId: string } | { alvo: "plano" } | { alvo: "formulario" };
+
+export interface ResultadoColunas {
+  aplicadas: number;
+  /** Quantas colunas o alvo tem — diferente das medidas quer dizer faixa errada. */
+  esperadas: number;
+  /** O que recebeu o X, para o aviso ("revisões do plano", "opções OK/N/OK/NA"). */
+  destino: string;
+}
+
+const r2 = (v: number) => +v.toFixed(2);
+
+/**
+ * Grava os centros de coluna medidos, na ordem da esquerda para a direita. Cada destino
+ * ancora o X do seu jeito: pós-venda (optX), revisão (colX) e roteiro (xFixed) guardam o
+ * CENTRO; plano e formulário guardam a borda esquerda da caixa (centro − largura/2).
+ */
+export function aplicarColunas(
+  pages: DesignerPage[],
+  page: DesignerPage,
+  alvo: AlvoColunas,
+  centros: number[],
+): ResultadoColunas | null {
+  if (alvo.alvo === "plano") {
+    const cfg = getManutencaoConfig(pages);
+    if (!cfg) return null;
+    const n = Math.min(cfg.colunas.length, centros.length);
+    for (let i = 0; i < n; i++) cfg.colunas[i].x = r2(centros[i] - (cfg.iconMm || 3) / 2);
+    return { aplicadas: n, esperadas: cfg.colunas.length, destino: "revisões do plano" };
+  }
+  if (alvo.alvo === "formulario") {
+    const cfg = getFormularioConfig(pages);
+    if (!cfg) return null;
+    const n = Math.min(cfg.colunas.length, centros.length);
+    for (let i = 0; i < n; i++) cfg.colunas[i].x = r2(centros[i] - cfg.celulaW / 2);
+    return { aplicadas: n, esperadas: cfg.colunas.length, destino: "colunas do formulário" };
+  }
+
+  const group = page.groups.find((g) => g.id === alvo.groupId);
+  if (!group || centros.length === 0) return null;
+  const xUnico = (x: number) => {
+    group.xFixed = r2(x);
+    group.markers.forEach((m) => (m.fx = clamp01(x / page.widthMm)));
+  };
+
+  if (group.docType === "revisao") {
+    const chaves = ["colX1", "colX2", "colX3"] as const;
+    const n = Math.min(3, centros.length);
+    for (let i = 0; i < n; i++) group[chaves[i]] = r2(centros[i]);
+    if (page.syncCols) syncColumnsToAll(page, group);
+    return { aplicadas: n, esperadas: 3, destino: "colunas ✔/✖/N.A." };
+  }
+  if (group.docType === "posvenda") {
+    const opts = group.posvendaOpts ?? [];
+    // Uma coluna só = folha com um X por linha (modo "same"): é o xFixed.
+    if (centros.length === 1 || opts.length <= 1) {
+      xUnico(centros[0]);
+      return { aplicadas: 1, esperadas: 1, destino: "X do grupo" };
+    }
+    if (!group.optX) group.optX = {};
+    const n = Math.min(opts.length, centros.length);
+    for (let i = 0; i < n; i++) group.optX[opts[i].valor] = r2(centros[i]);
+    if (page.syncCols) syncColumnsToAll(page, group);
+    return {
+      aplicadas: n,
+      esperadas: opts.length,
+      destino: `opções ${opts.map((o) => o.label).join("/")}`,
+    };
+  }
+  // roteiro (e qualquer outro de X único): a 1ª coluna medida.
+  xUnico(centros[0]);
+  return { aplicadas: 1, esperadas: 1, destino: "X do grupo" };
 }
 
 /** Adiciona só os nomes da fila que ainda não viraram marcação. Retorna quantos foram adicionados. */

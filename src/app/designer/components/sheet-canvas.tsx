@@ -24,6 +24,10 @@ import { getManutencaoConfig } from "@/lib/designer/manutencao";
 import { colunaDoItem, getFormularioConfig } from "@/lib/designer/formulario";
 import { drawHeaderFields } from "@/lib/designer/draw/header";
 import { drawGroupYStartPreview } from "@/lib/designer/draw/preview";
+import { medirColunas, medirLinhas, yDoCentro, type FaixaMm } from "@/lib/designer/medicao";
+import { aplicarCentrosNoGrupo, aplicarColunas, type AlvoColunas } from "@/lib/designer/actions";
+import { lerBitmap } from "@/lib/designer/bitmap";
+import { showToast } from "@/components/ui/toast";
 import type { DesignerGroup, DesignerPage, EditorState, HeaderField, Marker } from "@/lib/designer/types";
 
 /** Arrasto em curso — compartilhado pelo palco para que o mouseup global saiba encerrar. */
@@ -89,6 +93,8 @@ export function SheetCanvas({
   const imgCache = useRef<Record<string, HTMLImageElement>>({});
   const downPos = useRef<{ x: number; y: number } | null>(null);
   const moved = useRef(false);
+  /** Posição do mouse (px do canvas) durante a medição — desenha o retângulo da faixa. */
+  const mouseMedicao = useRef<{ x: number; y: number } | null>(null);
   // Virtualização: com muitas folhas empilhadas, manter todos os bitmaps vivos
   // consumiria centenas de MB. Só as folhas por perto são desenhadas.
   const [near, setNear] = useState(false);
@@ -312,6 +318,50 @@ export function SheetCanvas({
     ctx.clearRect(0, 0, cv.width, cv.height);
     ctx.drawImage(img, 0, 0, cv.width, cv.height);
     drawMarkers(ctx, cv);
+    drawFaixaMedicao(ctx, cv);
+  }
+
+  /**
+   * Retângulo da medição em andamento: do 1º canto até o mouse, com o nome do modo. Sem
+   * isso não havia retorno nenhum entre os dois cliques, e era fácil medir linhas achando
+   * que eram colunas, ou deixar o 2º canto fora da faixa.
+   */
+  function drawFaixaMedicao(ctx: CanvasRenderingContext2D, cv: HTMLCanvasElement) {
+    const cap = st.captureMode;
+    if (!cap || (cap.kind !== "medirLinhas" && cap.kind !== "medirColunas")) return;
+    const linhas = cap.kind === "medirLinhas";
+    const cor = linhas ? "#0BB783" : "#8950FC";
+    const rotulo = linhas ? "MEDIR LINHAS" : "MEDIR COLUNAS";
+    const mouse = mouseMedicao.current;
+    const fonte = Math.max(11, Math.round(cv.width * 0.011));
+    ctx.save();
+    ctx.font = `700 ${fonte}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.textBaseline = "bottom";
+    if (!cap.canto) {
+      if (mouse) {
+        ctx.fillStyle = cor;
+        ctx.fillText(`${rotulo} · 1º canto`, mouse.x + 8, mouse.y - 6);
+      }
+      ctx.restore();
+      return;
+    }
+    const ax = (cap.canto.x / page.widthMm) * cv.width;
+    const ay = (cap.canto.y / page.heightMm) * cv.height;
+    const bx = mouse ? mouse.x : ax;
+    const by = mouse ? mouse.y : ay;
+    ctx.fillStyle = linhas ? "rgba(11,183,131,0.12)" : "rgba(137,80,252,0.12)";
+    ctx.fillRect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay));
+    ctx.strokeStyle = cor;
+    ctx.lineWidth = Math.max(1.5, cv.width * 0.0015);
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay));
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(ax, ay, Math.max(3, cv.width * 0.003), 0, Math.PI * 2);
+    ctx.fillStyle = cor;
+    ctx.fill();
+    ctx.fillText(`${rotulo} · 2º canto`, Math.min(ax, bx), Math.min(ay, by) - 4);
+    ctx.restore();
   }
 
   // observa a proximidade da viewport para desenhar/liberar o bitmap
@@ -391,6 +441,13 @@ export function SheetCanvas({
     const cv = canvasRef.current!;
     const pos = canvasPos(e);
 
+    const cap = st.captureMode;
+    if (cap && (cap.kind === "medirLinhas" || cap.kind === "medirColunas")) {
+      mouseMedicao.current = pos;
+      redraw();
+      return;
+    }
+
     // arraste de grupo: a folha sob o cursor é a folha destino (o drop reancora lá)
     const gd = groupDragRef.current;
     if (gd) {
@@ -467,6 +524,82 @@ export function SheetCanvas({
     commit();
   }
 
+  /**
+   * Lê as divisórias da faixa no JPG de fundo e põe cada item do grupo no centro da sua
+   * célula. A imagem é recarregada em resolução natural: o canvas da tela é redimensionado
+   * e perderia as bordas finas.
+   */
+  async function lerBitmapDoFundo(): Promise<ImageData | null> {
+    if (!bgPage.imageSrc) {
+      showToast("Esta folha não tem imagem de fundo para medir.", "error");
+      return null;
+    }
+    return lerBitmap(bgPage.imageSrc);
+  }
+
+  /** Centros das colunas na faixa (rótulos ou caixinhas), gravados no alvo da medição. */
+  async function medirColunasEAplicar(alvo: AlvoColunas, faixa: FaixaMm) {
+    try {
+      const bitmap = await lerBitmapDoFundo();
+      if (!bitmap) return;
+      const colunas = medirColunas(bitmap, faixa, page.widthMm, page.heightMm);
+      if (colunas.length === 0) {
+        showToast("Nenhuma coluna na faixa. Pegue só a linha dos rótulos (ou das caixinhas), de ponta a ponta.", "error");
+        return;
+      }
+      const r = aplicarColunas(st.pages, page, alvo, colunas.map((c) => c.centro));
+      if (!r) return;
+      commit();
+      const bate = colunas.length === r.esperadas;
+      showToast(
+        `${colunas.length} coluna(s) medida(s) → ${r.aplicadas} gravada(s) em ${r.destino}.` +
+          (bate ? "" : ` Esperava ${r.esperadas}: confira a faixa.`),
+        bate ? "success" : "info",
+      );
+    } catch {
+      showToast("Não consegui ler a imagem de fundo.", "error");
+    }
+  }
+
+  async function medirEAplicar(groupId: string, faixa: FaixaMm) {
+    const group = page.groups.find((g) => g.id === groupId);
+    if (!group) return;
+    try {
+      const bitmap = await lerBitmapDoFundo();
+      if (!bitmap) return;
+      const medida = medirLinhas(bitmap, faixa, page.widthMm, page.heightMm);
+      if (medida.centros.length === 0) {
+        showToast(
+          `Nenhuma célula na faixa (${medida.divisorias.length} divisória(s)). Selecione só as colunas de marcação, de borda a borda da tabela.`,
+          "error",
+        );
+        return;
+      }
+      const caixa =
+        group.docType === "manutencao"
+          ? getManutencaoConfig(st.pages)?.iconMm ?? 3
+          : group.docType === "formulario"
+          ? getFormularioConfig(st.pages)?.celulaH ?? 5
+          : 0;
+      const ys = medida.centros.map((c) => yDoCentro(group.docType, c, caixa));
+      const r = aplicarCentrosNoGrupo(group, page, ys);
+      commit();
+      const alturas = medida.uniforme
+        ? `alturas uniformes (passo ${medida.passo?.toFixed(2) ?? "—"} mm)`
+        : `alturas desiguais (${Math.min(...medida.alturas).toFixed(2)} a ${Math.max(...medida.alturas).toFixed(2)} mm)`;
+      const bate = r.celulas === r.itens;
+      showToast(
+        `${r.celulas} célula(s) medida(s), ${alturas}. ` +
+          `${r.aplicados} de ${r.itens} item(ns) posicionados` +
+          (r.criados > 0 ? ` (${r.criados} criado(s) da fila). ` : ". ") +
+          (bate ? "" : `Contagem diferente: confira se a faixa pegou o bloco certo.`),
+        bate ? "success" : "info",
+      );
+    } catch {
+      showToast("Não consegui ler a imagem de fundo.", "error");
+    }
+  }
+
   function handleCapture(pos: { x: number; y: number }) {
     const cap = st.captureMode;
     if (!cap) return;
@@ -481,6 +614,20 @@ export function SheetCanvas({
       }
       return null;
     };
+    if (cap.kind === "medirLinhas" || cap.kind === "medirColunas") {
+      // 1º clique guarda um canto e espera o oposto; o 2º mede.
+      if (!cap.canto) {
+        st.captureMode = { ...cap, canto: { x: xmm, y: ymm } };
+        commit();
+        return;
+      }
+      const faixa = { x0: cap.canto.x, x1: xmm, y0: cap.canto.y, y1: ymm };
+      st.captureMode = null;
+      commit();
+      if (cap.kind === "medirLinhas") void medirEAplicar(cap.groupId, faixa);
+      else void medirColunasEAplicar(cap.alvo, faixa);
+      return;
+    }
     if (cap.kind === "flowTop" || cap.kind === "flowBottom") {
       const target = st.pages.find((p) => p.id === cap.pageId);
       if (target) {

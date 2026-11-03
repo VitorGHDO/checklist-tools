@@ -21,6 +21,14 @@ export const COND_TODAS = "";
 
 export const DEFAULT_ICON_MM = 3;
 
+/** Pasta dos JPGs de marcação, como nos planos antigos (pm_commander_2025/v1). */
+export const MARCACOES_PATH_PADRAO = "dirname(dirname(getcwd())) . '/marcacoes/'";
+
+/** O plano imprime as marcações com os JPGs antigos (bola/triângulo/X)? */
+export function usaImagens(cfg: ManutencaoConfig | null | undefined): boolean {
+  return cfg?.marcacao === "imagem";
+}
+
 /** Nome do objeto de respostas dentro da função de desenho, como no modelo. */
 export const VAR_RESPOSTA_PADRAO = "resposta";
 

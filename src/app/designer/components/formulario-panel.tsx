@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Crosshair, Plus, X } from "lucide-react";
+import { Crosshair, Plus, ScanLine, X } from "lucide-react";
 import { showToast } from "@/components/ui/toast";
 import {
   adicionarColuna,
@@ -107,6 +107,18 @@ export function FormularioPanel({ st, cfg, rerender, commit }: Props) {
             />
           </label>
 
+          <button
+            onClick={() => {
+              st.captureMode = { kind: "medirColunas", alvo: { alvo: "formulario" } };
+              commit();
+              showToast("Clique em dois cantos da linha de rótulos das colunas (OK, NOK…).", "info");
+            }}
+            title="Lê o centro de cada coluna de resultado pela linha de rótulos e grava o X de todas, na ordem."
+            className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg bg-[#173872]/10 hover:bg-[#173872]/20 border border-[#173872]/30 text-[#173872] text-[11px] font-medium"
+          >
+            <ScanLine className="w-3.5 h-3.5 rotate-90" />
+            medir colunas na folha
+          </button>
           <div className="space-y-1">
             {cfg.colunas.map((col) => (
               <div

@@ -1,9 +1,12 @@
-// Linhas de referência do roteiro: no PDF, um rótulo como "1. MÓDULO ADAS:" tem uma
-// linha (e uma marcação impressa) mas não tem campo próprio no banco — as respostas
-// vêm nos itens "a.", "b.", "c." abaixo dele. Uma linha de referência é uma marcação
-// EXTRA, inserida na linha do rótulo, que imprime a marcação do item seguinte; ao
-// inserir, esse item e todos os de baixo descem um incremento, para as marcações
-// voltarem a coincidir com as linhas impressas na folha.
+// Linhas de referência: no PDF, um rótulo como "1. MÓDULO ADAS:" tem uma linha (e uma
+// marcação impressa) mas não tem campo próprio no banco — as respostas vêm nos itens
+// "a.", "b.", "c." abaixo dele. Uma linha de referência é uma marcação EXTRA, inserida
+// na linha do rótulo, que imprime a marcação do item seguinte; ao inserir, esse item e
+// todos os de baixo descem um incremento, para as marcações voltarem a coincidir com as
+// linhas impressas na folha.
+//
+// Vale para o roteiro de entrega técnica e para a revisão de entrega — os dois têm
+// rótulos intercalados com as perguntas na folha impressa.
 //
 // Aqui ficam a resolução (pura) e as operações de inserir/remover a linha. Quem emite
 // o código PHP, quem desenha o preview e a sidebar consomem estas funções.
@@ -12,9 +15,9 @@ import { clamp01, makeMarker } from "./geometry";
 import { DEFAULT_INC } from "./paging";
 import type { DesignerGroup, DesignerPage, Marker } from "./types";
 
-/** Só o roteiro tem rótulos de referência intercalados com as perguntas. */
+/** Roteiro e revisão têm rótulos de referência intercalados com as perguntas. */
 export function supportsMirror(group: Pick<DesignerGroup, "docType">): boolean {
-  return group.docType === "roteiro";
+  return group.docType === "roteiro" || group.docType === "revisao";
 }
 
 const incOf = (g: Pick<DesignerGroup, "increment">) => g.increment || DEFAULT_INC;
@@ -102,6 +105,9 @@ export function insertMirrorRow(
   row.mirrorNext = true;
   if (target.fx !== undefined) row.fx = target.fx;
   if (target.type !== undefined) row.type = target.type;
+  // revisão: a resposta impressa é a do item seguinte (coluna ✓/✗/NA ou campo texto).
+  if (target.tipo !== undefined) row.tipo = target.tipo;
+  if (target.resposta !== undefined) row.resposta = target.resposta;
 
   for (let k = index; k < group.markers.length; k++) {
     const m = group.markers[k];

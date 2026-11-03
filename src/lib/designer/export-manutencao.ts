@@ -20,17 +20,34 @@ import {
   nomeFuncaoDe,
   sufixoLimpoDe,
   TAB,
+  type Fonte,
 } from "./export-cabecalho";
 import {
   assinaturaMascara,
   cobreTodasAsRevisoes,
   colunaLabel,
+  DEFAULT_ICON_MM,
   itensDoPlano,
+  MARCACOES_PATH_PADRAO,
   mascaraDoItem,
   ordenarPorColuna,
+  usaImagens,
   valoresDaColuna,
 } from "./manutencao";
-import type { DesignerGroup, DesignerPage, ManutencaoConfig, Marker } from "./types";
+import type {
+  DesignerGroup,
+  DesignerPage,
+  HeaderField,
+  HeaderFieldData,
+  HeaderFieldTexto,
+  ManutencaoConfig,
+  Marker,
+} from "./types";
+
+/** Os JPGs de marcação, na ordem em que a função de marcação antiga os recebe. */
+const IMGS_MARCACAO = "$img_bola, $img_triangulo, $img_x";
+/** E na ordem em que gerarDesenho/gerarImpressao os recebem, depois dos fundos. */
+export const IMGS_PARAMETRO = ["$img_x", "$img_bola", "$img_triangulo"];
 
 function sheetsOf(pages: DesignerPage[]): DesignerPage[] {
   return pages.filter((p) => p.kind === "checklist" && p.docType === "manutencao");
@@ -83,6 +100,24 @@ function funcaoMarcacao(cfg: ManutencaoConfig, indent: string, usaTriangulo: boo
   const T2 = indent + TAB + TAB;
   const T3 = indent + TAB + TAB + TAB;
   const L: string[] = [];
+  if (usaImagens(cfg)) {
+    // Formato dos planos antigos: os três JPGs sempre, porque o formulário desses
+    // planos oferece as três respostas.
+    const t = fmtNum(cfg.iconMm || DEFAULT_ICON_MM, 2);
+    L.push(`${indent}function ${nome}($pdf, &$resposta, ${IMGS_MARCACAO}, $largura_itens, $y)`);
+    L.push(`${indent}{`);
+    L.push(`${T1}if (isset($resposta)) {`);
+    L.push(`${T2}if ($resposta == 1) {`);
+    L.push(`${T3}$pdf->Image($img_bola, $largura_itens, $y, ${t}, ${t});`);
+    L.push(`${T2}} else if ($resposta == 2) {`);
+    L.push(`${T3}$pdf->Image($img_triangulo, $largura_itens, $y, ${t}, ${t});`);
+    L.push(`${T2}} else if ($resposta == 3) {`);
+    L.push(`${T3}$pdf->Image($img_x, $largura_itens, $y, ${t}, ${t});`);
+    L.push(`${T2}}`);
+    L.push(`${T1}}`);
+    L.push(`${indent}}`);
+    return L;
+  }
   L.push(`${indent}function ${nome}($pdf, &$resposta, $largura_itens, $y)`);
   L.push(`${indent}{`);
   L.push(`${T1}if (isset($resposta)) {`);
@@ -232,7 +267,8 @@ function chamadaMarcacao(
   const y = fmtNum(m.fy * page.heightMm + (page.offsetY || 0), prec);
   const campo = m.label.trim() || "campo";
   const resp = varResposta(cfg);
-  return `${indent}${nomeFuncao("imprimirMarcacao", cfg)}($pdf, ${resp}->${campo}, $largura_itens, ${y});`;
+  const imgs = usaImagens(cfg) ? `, ${IMGS_MARCACAO}` : "";
+  return `${indent}${nomeFuncao("imprimirMarcacao", cfg)}($pdf, ${resp}->${campo}${imgs}, $largura_itens, ${y});`;
 }
 
 function itensDaFolha(
@@ -268,6 +304,70 @@ function itensDaFolha(
         bloco.markers.forEach((m) => out.push(chamadaMarcacao(m, page, cfg, prec, TAB)));
       }
     });
+  });
+  return out;
+}
+
+// ─── cabeçalho / rodapé ───────────────────────────────────────────────────────
+// No plano, "Local e data" é UMA célula: o local (nomeFantasia, com o campo local de
+// reserva) seguido da data entre parênteses, em d/m/y H:i. Por isso o campo de texto
+// do local e o campo de data se fundem num bloco só, emitido na posição do primeiro
+// dos dois — com os dois no cabeçalho, o local não sai duplicado.
+
+const CAMPOS_LOCAL = ["local", "nomefantasia"];
+/** Largura da célula quando só há o campo de data (o local não tem caixa própria). */
+const LARGURA_LOCAL_DATA = 100;
+const DATA_PADRAO = "s_datahora_concessionaria";
+
+function ehCampoLocal(f: HeaderField): boolean {
+  return f.tipo === "texto" && CAMPOS_LOCAL.includes(f.campo.trim().toLowerCase());
+}
+
+function localEDataLines(
+  local: HeaderFieldTexto | undefined,
+  data: HeaderFieldData | undefined,
+  indent: string,
+  fonte: Fonte,
+  resp: string,
+): string[] {
+  const caixa = local
+    ? { w: local.w, h: local.h, x: local.x, y: local.y, fonte: local.fontSize }
+    : { w: LARGURA_LOCAL_DATA, h: data!.h, x: data!.x1, y: data!.y, fonte: data!.fontSizeDentro };
+  const campoData = data?.campo.trim() || DATA_PADRAO;
+  const out: string[] = [];
+  out.push(...fonte(caixa.fonte === "" || caixa.fonte === undefined ? 10 : caixa.fonte, indent));
+  out.push(`${indent}$local = ${resp}->nomeFantasia ?? ${resp}->local ?? '';`);
+  out.push(`${indent}$data_formatada = '';`);
+  out.push(`${indent}if (!empty(${resp}->${campoData})) {`);
+  out.push(`${indent}${TAB}$dt = new DateTime(${resp}->${campoData});`);
+  out.push(`${indent}${TAB}$data_formatada = ' ' . $dt->format('d/m/y H:i');`);
+  out.push(`${indent}}`);
+  out.push(
+    `${indent}$pdf->writeHTMLCell(${caixa.w}, ${caixa.h}, ${caixa.x}, ${caixa.y}, $local . '(' . $data_formatada . ')', 0, 0, 0, true, 'L', true);`,
+  );
+  return out;
+}
+
+/** Campos do cabeçalho/rodapé do plano, com local + data fundidos numa célula (opcional). */
+function camposDoCabecalho(
+  fields: HeaderField[],
+  cfg: ManutencaoConfig,
+  indent: string,
+  fonte: Fonte,
+  resp: string,
+): string[] {
+  if (cfg.localEData === false) return fields.flatMap((f) => headerFieldLines(f, indent, fonte, resp));
+  const local = fields.find(ehCampoLocal) as HeaderFieldTexto | undefined;
+  const data = fields.find((f) => f.tipo === "data" && f.campo.trim()) as HeaderFieldData | undefined;
+  const out: string[] = [];
+  let emitido = false;
+  fields.forEach((f) => {
+    if (f === local || f === data) {
+      if (!emitido) out.push(...localEDataLines(local, data, indent, fonte, resp));
+      emitido = true;
+      return;
+    }
+    out.push(...headerFieldLines(f, indent, fonte, resp));
   });
   return out;
 }
@@ -323,7 +423,8 @@ export function generateManutencaoFile(
   // funções, sem os caminhos — quem declara os $fundoBg é a página do PDF, que já
   // existe. "completo" declara também, para quando não há página pronta.
   const completo = cfg.formatoArquivo === "completo";
-  const params = fundos;
+  // No modo imagem os JPGs chegam depois dos fundos, na ordem do modelo antigo.
+  const params = usaImagens(cfg) ? [...fundos, ...IMGS_PARAMETRO] : fundos;
   /** Algum item marca triângulo? Sem isso o ramo `== 2` nem é emitido. */
   const usaTriangulo = sheets.some((p) => p.groups.some((g) => g.markers.some((m) => m.type === "2")));
 
@@ -337,6 +438,13 @@ export function generateManutencaoFile(
     if (declaracoes.length) {
       L.push("");
       declaracoes.forEach((d) => L.push(`${d.v} = ${d.path};`));
+    }
+    if (usaImagens(cfg)) {
+      const pasta = (cfg.marcacoesPath ?? "").trim() || MARCACOES_PATH_PADRAO;
+      if (!declaracoes.length) L.push("");
+      L.push(`$img_bola = ${pasta} . 'bola.jpg';`);
+      L.push(`$img_triangulo = ${pasta} . 'triangulo.jpg';`);
+      L.push(`$img_x = ${pasta} . 'x.jpg';`);
     }
   }
 
@@ -373,7 +481,7 @@ export function generateManutencaoFile(
     const campos = (header?.headerFields ?? []).filter((f) => i === 0 || f.todasFolhas);
     if (campos.length) {
       L.push("");
-      campos.forEach((f) => headerFieldLines(f, TAB, fonte, resp).forEach((l) => L.push(l)));
+      camposDoCabecalho(campos, cfg, TAB, fonte, resp).forEach((l) => L.push(l));
     }
 
     L.push("");
@@ -390,7 +498,7 @@ export function generateManutencaoFile(
 
     if (ultima && footer?.headerFields?.length) {
       L.push("");
-      footer.headerFields.forEach((f) => headerFieldLines(f, TAB, fonte, resp).forEach((l) => L.push(l)));
+      camposDoCabecalho(footer.headerFields, cfg, TAB, fonte, resp).forEach((l) => L.push(l));
     }
   });
 

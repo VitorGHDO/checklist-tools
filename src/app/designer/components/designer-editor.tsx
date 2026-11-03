@@ -32,6 +32,9 @@ import {
   Unlink,
   Save,
   Upload,
+  ScanSearch,
+  Send,
+  BookOpen,
 } from "lucide-react";
 import { parseProjectJson, serializeProject } from "@/lib/designer/project-io";
 import { ToastContainer, showToast } from "@/components/ui/toast";
@@ -66,8 +69,23 @@ import {
 import { ReflowModal } from "./reflow-modal";
 import { ResetModal, type ResetScope } from "./reset-modal";
 import { RevisoesGridModal } from "./revisoes-grid-modal";
+import { PacotePosVendaModal } from "./pacote-posvenda-modal";
+import { usaPacoteEI } from "@/lib/designer/pacote-ei";
 import { FormularioPanel } from "./formulario-panel";
 import { ensureFormularioConfig } from "@/lib/designer/formulario";
+import { lerBitmap } from "@/lib/designer/bitmap";
+import { distribuirPosVenda, mapearCaixas } from "@/lib/designer/mapear-posvenda";
+import {
+  aplicarDistribuicao,
+  perfilDoMapa,
+  distribuirFolha,
+  distribuirTudo,
+  mapearFolha,
+  textoDaDistribuicao,
+  type FolhaLida,
+  type ResultadoMapa,
+  type ContextoMapa,
+} from "@/lib/designer/mapear-folha";
 import type { PagingValue } from "./paging-controls";
 import {
   clearGroups,
@@ -77,6 +95,7 @@ import {
 } from "@/lib/designer/reflow";
 import {
   moveGroupsToSheet,
+  moverGrupoPara,
   rangeOf,
   restackSheets,
   splitGroupToNextSheet,
@@ -184,6 +203,10 @@ export default function DesignerEditor() {
   const [resetOpen, setResetOpen] = useState(false);
   /** Item destacado ao abrir a grade de revisões; "" abre sem foco, null = fechada. */
   const [gradeFoco, setGradeFoco] = useState<string | null>(null);
+  // Arrastar e soltar grupos na sidebar: o grupo em curso e onde ele cairia.
+  const [grupoArrastado, setGrupoArrastado] = useState<string | null>(null);
+  const [pacoteAberto, setPacoteAberto] = useState(false);
+  const [alvoArrasto, setAlvoArrasto] = useState<{ pageId: string; indice: number } | null>(null);
 
   const commit = () => {
     st.geomTick += 1;
@@ -448,6 +471,174 @@ export default function DesignerEditor() {
     showToast(`Item movido para "${r.destino.title}" em ${r.destinoPage.name}${extra}.`, "success");
   }
 
+  /**
+   * Lê a tabela da folha e refaz os grupos por ela, depois de mostrar a prévia: blocos,
+   * células, quais campos vão para cada bloco e se os totais batem.
+   */
+  /**
+   * Pós-venda: lê os quadradinhos das folhas e distribui os campos dos grupos delas. A
+   * folha não tem padrão de tabela, então quem orienta a ordem são os grupos do extrator
+   * ("Entrada > DIANTEIRA").
+   */
+  async function mapearPosVenda(folhas: DesignerPage[], titulo: string) {
+    try {
+      const tabelasPorFolha = [];
+      for (const page of folhas) {
+        if (!page.imageSrc) continue;
+        const bitmap = await lerBitmap(page.imageSrc);
+        if (bitmap) tabelasPorFolha.push({ page, tabelas: mapearCaixas(bitmap, page) });
+      }
+      const caixas = tabelasPorFolha.reduce(
+        (s, f) => s + f.tabelas.reduce((a, t) => a + t.pilhas.reduce((b, p) => b + p.ys.length * p.xs.length, 0), 0),
+        0,
+      );
+      if (caixas === 0) {
+        showToast("Não achei quadradinhos de marcação nas folhas. Use medir linhas / medir colunas nos grupos.", "error");
+        return;
+      }
+      const grupos = folhas.flatMap((p) => p.groups);
+      const d = distribuirPosVenda(grupos, tabelasPorFolha);
+      if (d.totalCampos === 0) {
+        showToast("Os grupos não têm campos (nem itens, nem fila) para distribuir.", "error");
+        return;
+      }
+      // grupo com mais (ou menos) opções que caixas no conjunto: o X das que sobram fica
+      const opcoes = [...d.porFolha.flatMap((f) => f.grupos)]
+        .filter((g) => g.colunas && (g.modelo.posvendaOpts?.length ?? 0) !== g.colunas.length)
+        .map((g) => `• ${g.titulo}: ${g.modelo.posvendaOpts?.length ?? 0} opção(ões) no grupo, ${g.colunas!.length} caixa(s) na folha`);
+      const avisoOpcoes = opcoes.length
+        ? `ATENÇÃO — ajuste as opções destes grupos (ex.: SIM/NÃO = 2):\n${opcoes.join("\n")}\n\n`
+        : "";
+      if (!confirm(`${titulo}\n\n${caixas} caixa(s) encontradas.\n\n${avisoOpcoes}${textoDaDistribuicao(d)}`)) return;
+      avisarResultado(aplicarDistribuicao(d, contextoDoMapa()));
+    } catch {
+      showToast("Não consegui ler a imagem de uma das folhas.", "error");
+    }
+  }
+
+  async function mapearFolhaDaSidebar(sheet: DesignerPage) {
+    const perfil = perfilDoMapa(sheet.docType);
+    if (!perfil || !sheet.imageSrc) return;
+    if (perfil.modo === "caixas") return mapearPosVenda([sheet], sheet.name);
+    const modo = perfil.modo;
+    try {
+      const bitmap = await lerBitmap(sheet.imageSrc);
+      const mapa = bitmap && mapearFolha(bitmap, sheet.widthMm, sheet.heightMm, { modo });
+      if (!mapa || mapa.blocos.length === 0) {
+        showToast(
+          `Não achei a tabela de marcação em "${sheet.name}". Use medir linhas / medir colunas nos grupos.`,
+          "error",
+        );
+        return;
+      }
+      const d = distribuirFolha(st.pages, sheet, mapa);
+      if (d.totalCampos === 0) {
+        showToast("Os grupos desta folha não têm campos (nem itens, nem fila) para distribuir.", "error");
+        return;
+      }
+      if (!confirm(`${sheet.name}\n\n${avisoColunasDoPlano(mapa.centrosColunas.length)}${textoDaDistribuicao(d)}`)) return;
+      avisarResultado(aplicarDistribuicao(d, contextoDoMapa()));
+    } catch {
+      showToast("Não consegui ler a imagem desta folha.", "error");
+    }
+  }
+
+  /**
+   * Mapear tudo: lê todas as folhas com imagem e distribui os campos de todos os grupos
+   * pela arte, na ordem — o que não cabe numa folha continua no topo da seguinte.
+   */
+  async function mapearTudo() {
+    const perfil = perfilDoMapa(st.docType);
+    if (!perfil) return;
+    const folhas = st.pages.filter((p) => p.kind === "checklist" && p.docType === st.docType);
+    if (perfil.modo === "caixas") return mapearPosVenda(folhas, "MAPEAR TUDO");
+    const modo = perfil.modo;
+    const semImagem = folhas.filter((p) => !p.imageSrc).map((p) => p.name);
+    try {
+      const lidas: FolhaLida[] = [];
+      for (const page of folhas) {
+        if (!page.imageSrc) continue;
+        const bitmap = await lerBitmap(page.imageSrc);
+        const mapa = bitmap && mapearFolha(bitmap, page.widthMm, page.heightMm, { modo });
+        // Folha sem a tabela (a de anomalias, por exemplo) não recebe campo.
+        if (mapa && mapa.blocos.length > 0) lidas.push({ page, mapa });
+      }
+      if (lidas.length === 0) {
+        showToast("Nenhuma folha com a tabela de marcação foi encontrada. Carregue as imagens das folhas.", "error");
+        return;
+      }
+      const d = distribuirTudo(st.pages, lidas);
+      if (d.totalCampos === 0) {
+        showToast("Os grupos não têm campos (nem itens, nem fila) para distribuir.", "error");
+        return;
+      }
+      const aviso = semImagem.length ? `Sem imagem (ignoradas): ${semImagem.join(", ")}\n\n` : "";
+      const colunas = avisoColunasDoPlano(lidas[0].mapa.centrosColunas.length);
+      if (!confirm(`MAPEAR TUDO\n\n${aviso}${colunas}${textoDaDistribuicao(d)}`)) return;
+      avisarResultado(aplicarDistribuicao(d, contextoDoMapa()));
+    } catch {
+      showToast("Não consegui ler a imagem de uma das folhas.", "error");
+    }
+  }
+
+  function contextoDoMapa(): ContextoMapa {
+    return { manutencao: st.docType === "manutencao" ? getManutencaoConfig(st.pages) : null };
+  }
+
+  /** Plano: o X das revisões vem das colunas lidas — avisa se a quantidade não bate. */
+  function avisoColunasDoPlano(colunasLidas: number): string {
+    const cfg = st.docType === "manutencao" ? getManutencaoConfig(st.pages) : null;
+    if (!cfg) return "";
+    if (cfg.colunas.length === colunasLidas) {
+      return `X das ${colunasLidas} revisões: medido na folha.\n\n`;
+    }
+    return (
+      `ATENÇÃO: a folha tem ${colunasLidas} colunas de revisão e o plano está configurado com ` +
+      `${cfg.colunas.length}. Só as ${Math.min(colunasLidas, cfg.colunas.length)} primeiras recebem o X — ` +
+      `ajuste o número de revisões na aba Revisões antes, se for o caso.\n\n`
+    );
+  }
+
+  function avisarResultado(r: ResultadoMapa) {
+    commit();
+    showToast(
+      `${r.posicionados} campo(s) posicionados.` +
+        (r.continuam
+          ? ` ${r.continuam} continuam ${r.destinoSobra ? `no topo da ${r.destinoSobra.name}` : "no fim da última folha"} — mapeie lá.`
+          : ""),
+      r.continuam ? "info" : "success",
+    );
+  }
+
+  function marcarAlvoArrasto(pageId: string, indice: number) {
+    setAlvoArrasto((prev) => (prev && prev.pageId === pageId && prev.indice === indice ? prev : { pageId, indice }));
+  }
+
+  /**
+   * Solta o grupo arrastado na posição marcada. Os grupos mapeados ficam onde a arte
+   * diz; o que trocou de folha volta ao passo regular até ser mapeado lá.
+   */
+  function soltarGrupo() {
+    const id = grupoArrastado;
+    const alvo = alvoArrasto;
+    setGrupoArrastado(null);
+    setAlvoArrasto(null);
+    if (!id || !alvo) return;
+    const destino = st.pages.find((p) => p.id === alvo.pageId);
+    if (!destino) return;
+    const origemIdx = destino.groups.findIndex((g) => g.id === id);
+    // Na mesma folha, tirar o grupo antes desloca o índice dos que vêm depois dele.
+    const indice = origemIdx >= 0 && origemIdx < alvo.indice ? alvo.indice - 1 : alvo.indice;
+    const r = moverGrupoPara(st.pages, st.docType, id, destino, indice);
+    if (!r) return;
+    restack(true);
+    commit();
+    if (r.trocouFolha) {
+      const g = destino.groups.find((x) => x.id === id);
+      showToast(`"${g?.title ?? "Grupo"}" movido para ${destino.name}. Mapeie a folha para posicioná-lo pela arte.`, "info");
+    }
+  }
+
   function toggleCheckSheet(sheet: DesignerPage) {
     const all = sheet.groups.every((g) => st.checkedGroups[g.id]);
     sheet.groups.forEach((g) => {
@@ -654,6 +845,14 @@ export default function DesignerEditor() {
       selStatus = "clique no canvas na posição X da opção";
     } else if (cap.kind === "headerPoint") {
       selStatus = "clique no canvas para posicionar o campo";
+    } else if (cap.kind === "medirLinhas") {
+      selStatus = cap.canto
+        ? "agora clique no canto oposto da faixa"
+        : "clique num canto da faixa das colunas de marcação (topo da 1ª linha)";
+    } else if (cap.kind === "medirColunas") {
+      selStatus = cap.canto
+        ? "agora clique no canto oposto da linha de rótulos"
+        : "clique num canto da linha de rótulos das colunas (ou de uma linha de caixinhas)";
     }
   } else if (page && st.selectedMarkerId) {
     for (const g of page.groups) {
@@ -705,6 +904,15 @@ export default function DesignerEditor() {
             <h1 className="text-base font-semibold text-[#173872]">Designer de PDF</h1>
           </div>
           <div className="flex items-center gap-2">
+            <Link
+              href="/manual#designer"
+              target="_blank"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e8e8e8] hover:border-[#173872]/40 text-[#464E5F] hover:bg-[#F9F9F9] transition-all text-sm font-medium"
+              title="Passo a passo do Designer (abre em outra aba)"
+            >
+              <BookOpen className="w-4 h-4" />
+              Manual
+            </Link>
             <button
               onClick={saveProjectFile}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#173872]/30 hover:border-[#173872] text-[#173872] hover:bg-[#173872]/5 transition-all text-sm font-medium"
@@ -1168,6 +1376,36 @@ export default function DesignerEditor() {
                 </div>
               )}
 
+              {/* Ponte com o repositório: o Designer grava artes + pacote JSON e a skill de
+                  lá monta o imprimir.php. Pós-venda: a skill faz tudo (folha sem padrão).
+                  Roteiro/revisão: a skill só encaixa as posições já mapeadas. */}
+              {(st.docType === "posvenda" || usaPacoteEI(st.docType)) && (
+                <button
+                  onClick={() => setPacoteAberto(true)}
+                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#173872] hover:bg-[#122d5e] text-white text-[12px] font-semibold"
+                  title={
+                    st.docType === "posvenda"
+                      ? "Grava as artes e o pos_venda.json no acampa-checklist e gera o comando da skill checklist-pos-venda."
+                      : "Grava as artes e o designer.json (posições mapeadas) no stellantis-ei-checklist e gera o comando da skill checklist-designer, que encaixa tudo no imprimir.php."
+                  }
+                >
+                  <Send className="w-4 h-4" />
+                  enviar para o Claude Code
+                </button>
+              )}
+
+              {/* Um clique para o checklist inteiro: imagens carregadas + grupos na ordem. */}
+              {perfilDoMapa(st.docType) && visiblePages.some((p) => p.imageSrc) && (
+                <button
+                  onClick={() => void mapearTudo()}
+                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#8950FC] hover:bg-[#7337e8] text-white text-[12px] font-semibold"
+                  title="Lê todas as folhas com imagem e posiciona os campos de todos os grupos pela arte, na ordem. O grupo que não cabe numa folha continua no topo da seguinte. Mostra a prévia antes de aplicar."
+                >
+                  <ScanSearch className="w-4 h-4" />
+                  mapear tudo ({visiblePages.filter((p) => p.imageSrc).length} folha(s))
+                </button>
+              )}
+
               {/* todos os grupos de todas as folhas, agrupados por folha */}
               {visiblePages.map((sheet, si) => (
                 <div key={sheet.id} className="space-y-2">
@@ -1202,12 +1440,42 @@ export default function DesignerEditor() {
                         {sheet.groups.every((g) => st.checkedGroups[g.id]) ? "desmarcar" : "marcar"} folha
                       </button>
                     )}
+                    {perfilDoMapa(sheet.docType) && sheet.imageSrc && (
+                      <button
+                        onClick={() => void mapearFolhaDaSidebar(sheet)}
+                        className={`${sheet.groups.length > 0 ? "" : "ml-auto "}flex items-center gap-1 text-[10px] font-semibold text-[#8950FC] hover:text-[#6a35d9] bg-[#8950FC]/10 border border-[#8950FC]/30 rounded px-1.5 py-0.5`}
+                        title="Lê a tabela inteira da folha (colunas ✓ ✗ N.A., blocos e linhas) e coloca cada campo no centro da sua linha, refazendo os grupos pela folha. Mostra a prévia antes de aplicar."
+                      >
+                        <ScanSearch className="w-3 h-3" />
+                        mapear folha
+                      </button>
+                    )}
                     <span className="flex-1 h-px bg-[#e8e8e8]" />
                   </div>
                   {sheet.groups.length === 0 ? (
-                    <p className="text-[10.5px] text-[#b0b0bf] pl-1">Nenhum grupo nesta folha.</p>
+                    // Folha vazia também é alvo: soltar aqui põe o grupo nela.
+                    <p
+                      className={`text-[10.5px] pl-1 py-2 rounded ${
+                        grupoArrastado
+                          ? alvoArrasto?.pageId === sheet.id
+                            ? "text-[#8950FC] bg-[#8950FC]/10 border border-dashed border-[#8950FC]"
+                            : "text-[#8950FC] border border-dashed border-[#8950FC]/40"
+                          : "text-[#b0b0bf]"
+                      }`}
+                      onDragOver={(e) => {
+                        if (!grupoArrastado) return;
+                        e.preventDefault();
+                        marcarAlvoArrasto(sheet.id, 0);
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        soltarGrupo();
+                      }}
+                    >
+                      {grupoArrastado ? "Solte aqui para mover o grupo para esta folha." : "Nenhum grupo nesta folha."}
+                    </p>
                   ) : (
-                    sheet.groups.map((g) => (
+                    sheet.groups.map((g, gi) => (
                       <GroupCard
                         key={g.id}
                         st={st}
@@ -1222,6 +1490,25 @@ export default function DesignerEditor() {
                         formularioCfg={formularioCfg}
                         onMoveMarkerToPrev={moveMarkerToPrev}
                         onAbrirGrade={manutencaoCfg ? (markerId) => setGradeFoco(markerId) : undefined}
+                        arrasto={{
+                          inicio: () => setGrupoArrastado(g.id),
+                          fim: () => {
+                            setGrupoArrastado(null);
+                            setAlvoArrasto(null);
+                          },
+                          sobre: (antes) => marcarAlvoArrasto(sheet.id, antes ? gi : gi + 1),
+                          soltar: soltarGrupo,
+                          guia:
+                            grupoArrastado && grupoArrastado !== g.id && alvoArrasto?.pageId === sheet.id
+                              ? alvoArrasto.indice === gi
+                                ? "antes"
+                                : alvoArrasto.indice === gi + 1 && gi === sheet.groups.length - 1
+                                ? "depois"
+                                : null
+                              : null,
+                          ativo: grupoArrastado === g.id,
+                          emCurso: !!grupoArrastado,
+                        }}
                       />
                     ))
                   )}
@@ -1277,6 +1564,10 @@ export default function DesignerEditor() {
           {page && <ExportPanel st={st} page={page} />}
         </aside>
       </div>
+
+      {pacoteAberto && (
+        <PacotePosVendaModal pages={st.pages} docType={st.docType} onClose={() => setPacoteAberto(false)} />
+      )}
 
       {gradeFoco !== null && manutencaoCfg && (
         <RevisoesGridModal

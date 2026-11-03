@@ -2,8 +2,9 @@
 //
 // Diferente dos outros checklists em três pontos:
 //   - a tabela é `formulario_perguntas` (27 colunas), não `checklist_perguntas`;
-//   - onde o checklist tem `status`, o plano tem `pagina` — a regra de numerar é a
-//     mesma (índice do grupo + 1) e NÃO existe tabela de status para popular;
+//   - onde o checklist tem `status`, o plano tem `pagina` — numerada pelo índice do
+//     grupo a partir da página inicial da config (padrão 1), e NÃO existe tabela de
+//     status para popular;
 //   - não há migration: os campos viram apenas a coluna `campo` das perguntas e as
 //     propriedades lidas no PHP do PDF ($resposta_formulario->campo).
 //
@@ -186,6 +187,13 @@ export interface PlanoManutencaoConfig {
   ordemGrupoRevisao: number;
   /** ordemGrupo do 1º grupo de itens — os anteriores ficam para dados/revisão. */
   ordemGrupoInicial: number;
+  /** `pagina` do 1º grupo de itens; os seguintes contam a partir dele. */
+  paginaInicial: number;
+}
+
+/** Página do 1º grupo. Rascunho salvo antes do campo existir não o traz: vale 1. */
+export function paginaInicialDe(cfg: Pick<PlanoManutencaoConfig, "paginaInicial">): number {
+  return Math.max(1, Math.floor(cfg.paginaInicial ?? 1) || 1);
 }
 
 export function planoConfigPadrao(formulario = ""): PlanoManutencaoConfig {
@@ -202,6 +210,7 @@ export function planoConfigPadrao(formulario = ""): PlanoManutencaoConfig {
     tituloRevisao: "Revisão",
     ordemGrupoRevisao: 2,
     ordemGrupoInicial: 3,
+    paginaInicial: 1,
   };
 }
 
@@ -260,11 +269,12 @@ function linhaDaRevisao(cfg: PlanoManutencaoConfig): Linha {
   ];
 }
 
-function linhaDoItem(p: PerguntaAssociada, cfg: PlanoManutencaoConfig): Linha {
+/** `pagina` fixa = pergunta essencial (dados do veículo): fica na 1ª página, com a revisão. */
+function linhaDoItem(p: PerguntaAssociada, cfg: PlanoManutencaoConfig, pagina?: number): Linha {
   return [
     "", // id: vazio, o auto_increment resolve
     cfg.formulario,
-    p.statusIdx + 1, // pagina — mesma regra de numeração do status
+    pagina ?? p.statusIdx + paginaInicialDe(cfg), // pagina — índice do grupo a partir da inicial
     cfg.botaoPagina,
     p.campo,
     p.pergunta,
@@ -303,10 +313,15 @@ function ordenadas(perguntas: PerguntaAssociada[]): PerguntaAssociada[] {
  * Linhas para colar no banco: cada valor entre aspas simples, separados por vírgula, e
  * `'[NULL]'` onde a coluna é nula. O `id` sai vazio — quem numera é o auto_increment.
  */
-export function buildPlanoDbRows(perguntas: PerguntaAssociada[], cfg: PlanoManutencaoConfig): string {
+export function buildPlanoDbRows(
+  perguntas: PerguntaAssociada[],
+  cfg: PlanoManutencaoConfig,
+  essenciais: PerguntaAssociada[] = [],
+): string {
   const q = (v: string | number | null) =>
     `'${String(v === null ? "[NULL]" : v).replace(/'/g, "''")}'`;
   const linhas: Linha[] = [];
+  essenciais.forEach((p) => linhas.push(linhaDoItem(p, cfg, 1)));
   if (cfg.incluirRevisao) linhas.push(linhaDaRevisao(cfg));
   ordenadas(perguntas).forEach((p) => linhas.push(linhaDoItem(p, cfg)));
   return linhas.map((l) => l.map(q).join(",")).join("\n");
@@ -325,12 +340,21 @@ function insert(linha: Linha): string {
   return `INSERT INTO formulario_perguntas (${cols.join(",")})\n    VALUES (${vals.join(",")});`;
 }
 
-export function buildPlanoSql(perguntas: PerguntaAssociada[], cfg: PlanoManutencaoConfig): string {
+export function buildPlanoSql(
+  perguntas: PerguntaAssociada[],
+  cfg: PlanoManutencaoConfig,
+  essenciais: PerguntaAssociada[] = [],
+): string {
   const lines: string[] = [
     `-- Plano de Manutenção — formulario ${cfg.formulario || "(sem id)"}`,
     "-- Sem migration e sem tabela de status: a coluna `pagina` numera as páginas.",
     "",
   ];
+  if (essenciais.length) {
+    lines.push("-- Dados do veículo (campos essenciais) — revisar o texto das perguntas");
+    essenciais.forEach((p) => lines.push(insert(linhaDoItem(p, cfg, 1))));
+    lines.push("");
+  }
   if (cfg.incluirRevisao) {
     lines.push("-- Seletor da revisão (o PHP do PDF lê este campo para achar a coluna)");
     lines.push(insert(linhaDaRevisao(cfg)));
@@ -340,7 +364,7 @@ export function buildPlanoSql(perguntas: PerguntaAssociada[], cfg: PlanoManutenc
   ordenadas(perguntas).forEach((p) => {
     if (p.statusIdx !== paginaAtual) {
       paginaAtual = p.statusIdx;
-      lines.push(`-- página ${paginaAtual + 1} — ${p.titulo}`);
+      lines.push(`-- página ${paginaAtual + paginaInicialDe(cfg)} — ${p.titulo}`);
     }
     lines.push(insert(linhaDoItem(p, cfg)));
   });

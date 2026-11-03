@@ -159,6 +159,54 @@ function buildSystemPrompt(options: CorrectionOptions, project?: string, checkli
     );
   }
 
+  // Plano de Manutenção: os blocos da tabela são as posições do veículo no elevador. Em
+  // folhas antigas o rótulo vinha por extenso numa linha ("VEÍCULO NO SOLO"); nas novas
+  // (Jeep Avenger) é um desenho do carro com "SOLO" miúdo embaixo, que o texto extraído
+  // não traz antes dos itens — com o prompt genérico tudo caía num grupo só. Aqui a IA
+  // lê os blocos da imagem e devolve um rótulo em caixa alta por bloco.
+  if (checklistType === "plano-manutencao") {
+    let prompt =
+      "Você recebeu o texto extraído de uma folha de Plano de Manutenção Programada de veículos e a IMAGEM da folha.\n" +
+      "A ESTRUTURA (quais blocos existem e que itens pertencem a cada um) vem da IMAGEM; use o texto para conferir a grafia.\n\n" +
+      "SUA TAREFA:\n" +
+      "Retorne APENAS os títulos de bloco e os itens a verificar/substituir, limpos e organizados.\n\n" +
+      "BLOCOS (TÍTULOS DE SEÇÃO):\n" +
+      "- A tabela é dividida em blocos pela posição do veículo no elevador, indicada na coluna da esquerda " +
+      "('Posição do veículo no elevador'). Cada bloco é separado do seguinte por uma linha horizontal mais grossa.\n" +
+      "- O rótulo do bloco pode estar escrito por extenso (ex.: 'VEÍCULO NO SOLO') ou em letras pequenas embaixo de um " +
+      "desenho do carro no elevador (ex.: 'SOLO', 'MEIA ALTURA', 'ALTURA MÁXIMA'). Copie o rótulo como aparece na imagem.\n" +
+      "- Escreva o rótulo em MAIÚSCULAS, sozinho na linha, ANTES dos itens do bloco.\n" +
+      "- Se o mesmo rótulo aparece em dois blocos (ex.: 'SOLO' no início e no fim da tabela), repita-o: são blocos distintos.\n\n" +
+      "ITENS:\n" +
+      "- Cada linha da tabela é UM item e deve sair em UMA única linha, mesmo quando o texto ocupa várias linhas na folha " +
+      "(junte as linhas quebradas, incluindo a linha em negrito 'A cada ...' do mesmo item).\n" +
+      "- Mantenha as referências às notas no texto do item, ex.: '(1)', '(2) (3)'.\n" +
+      "- Itens com a indicação 'por km' e/ou 'por tempo' na própria linha: acrescente ao fim do item, entre colchetes, " +
+      "o que aparece — '[por km]', '[por tempo]' ou '[por km e por tempo]'. Itens com sub-linhas 'Km' e 'Meses' contam como " +
+      "'[por km e por tempo]'.\n" +
+      "- Mantenha a ordem da folha, de cima para baixo.\n\n" +
+      "IGNORE POR COMPLETO (não é título nem item):\n" +
+      "- Título do documento, marca e modelo do veículo, 'ANO MODELO'\n" +
+      "- Campos de cabeçalho: O.S., PLACA, CHASSI, KM\n" +
+      "- Cabeçalho da tabela: 'Itens a verificar/substituir', 'Posição do veículo no elevador', 'QUILOMETRAGEM (a cada ...)', " +
+      "números das revisões (1ª, 2ª...), linhas de km e de meses\n" +
+      "- Tudo abaixo da tabela: 'Espaço reservado para assinalar...', notas numeradas ('(1) Itens que devem ser...', " +
+      "'(2) Para veículos...'), observações soltas, 'NOTA:', 'NOTAS', local e data, carimbo e assinatura, selo FSC, código do formulário\n" +
+      "- NÃO adicione explicações, comentários, numeração própria nem formatação markdown.\n\n" +
+      "EXEMPLO DE SAÍDA ESPERADA:\n" +
+      "SOLO\n" +
+      "Verificação do estado da bateria de chumbo de 12 V, utilizando equipamento de diagnóstico homologado pela STELLANTIS (1).\n" +
+      "Verificação do funcionamento do freio de estacionamento. (4)\n" +
+      "...\n\n" +
+      "MEIA ALTURA\n" +
+      "Verificação dos pneus (desgaste e calibragem).\n" +
+      "Substituição do fluido dos freios. A cada 24 meses (independente da quilometragem) [por tempo]\n";
+    if (options.additionalInstructions) {
+      prompt += `\nINSTRUÇÕES ADICIONAIS DO USUÁRIO:\n${options.additionalInstructions}\n`;
+    }
+    return prompt;
+  }
+
   // Prompt específico para o projeto Entrega Impecável
   if (project === "entrega-impecavel") {
     return (
@@ -247,6 +295,19 @@ function buildUserPrompt(text: string, project?: string, pageNumber?: number, ch
     prompt += text;
     prompt += "\n---FIM DO TEXTO---\n\n";
     prompt += "Retorne o texto limpo conforme as regras do sistema, mantendo apenas grupos e itens de verificação.";
+    return prompt;
+  }
+
+  if (checklistType === "plano-manutencao") {
+    let prompt = "";
+    if (pageNumber && pageNumber > 0) {
+      prompt += `PÁGINA ${pageNumber} DO DOCUMENTO\n\n`;
+    }
+    prompt += "Texto extraído da folha do Plano de Manutenção (apoio para a grafia — os blocos vêm da imagem):\n\n";
+    prompt += "---INÍCIO DO TEXTO---\n";
+    prompt += text;
+    prompt += "\n---FIM DO TEXTO---\n\n";
+    prompt += "Retorne o texto limpo conforme as regras do sistema: um rótulo em MAIÚSCULAS por bloco da tabela, seguido dos itens do bloco, um por linha.";
     return prompt;
   }
 

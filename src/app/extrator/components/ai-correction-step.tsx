@@ -18,17 +18,32 @@ import {
   Pencil,
   Database,
   Trash2,
+  Send,
+  GripVertical,
 } from "lucide-react";
 import { showToast } from "@/components/ui/toast";
+import { CampoRepositorio } from "@/components/ui/campo-repositorio";
+import { EnviarPosVendaModal } from "./enviar-posvenda-modal";
 import { AI_MODELS, type UploadedImage, type ChecklistType, type DraftDados, type PerguntaAssociada } from "@/lib/types";
 import { getApiKey as getProviderApiKey } from "@/lib/api-keys";
 import {
   aplicarModoKmTempo,
   modoKmTempo,
+  parKmTempo,
   secaoIgnorada,
   type ModoKmTempo,
   type PlanoManutencaoConfig,
 } from "@/lib/extrator/plano-manutencao";
+import { gruposDasSecoes } from "@/lib/extrator/pos-venda";
+import { paraMysql } from "@/lib/extrator/formato-db";
+import { camposEssenciais, colunasEssenciais, temCamposEssenciais } from "@/lib/extrator/campos-essenciais";
+import {
+  REPOSITORIOS,
+  caminhoDoRepositorio,
+  gravarNoRepositorio,
+  prefixoMigration,
+  type ChaveRepositorio,
+} from "@/lib/repositorio";
 import type { MigrationField } from "@/app/api/generate-fields/route";
 import Image from "next/image";
 import { PerguntasStatusTab } from "./perguntas-status-tab";
@@ -42,6 +57,31 @@ interface WorkingGroup {
 }
 
 type Project = "entrega-impecavel" | "pos-venda";
+
+/**
+ * Move o bloco [inicio, inicio + tamanho) para antes/depois de `alvo`, adotando a seção
+ * do alvo. É a correção manual de quando a IA põe um campo na seção vizinha: a seção é
+ * o que decide o status do campo na aba Perguntas, então mudar só a ordem não bastaria.
+ */
+function moverCampos(
+  fields: MigrationField[],
+  inicio: number,
+  tamanho: number,
+  alvo: number,
+  antes: boolean,
+): MigrationField[] {
+  if (alvo >= inicio && alvo < inicio + tamanho) return fields;
+  const secao = fields[alvo]?.secao;
+  const bloco = fields.slice(inicio, inicio + tamanho).map((f) => ({ ...f, secao }));
+  const resto = [...fields.slice(0, inicio), ...fields.slice(inicio + tamanho)];
+  const alvoNoResto = alvo < inicio ? alvo : alvo - tamanho;
+  const pos = antes ? alvoNoResto : alvoNoResto + 1;
+  return [...resto.slice(0, pos), ...bloco, ...resto.slice(pos)];
+}
+
+/** Rótulo de bloco do plano: "SOLO", "MEIA ALTURA", "VEÍCULO EM ALTURA MÁXIMA"... */
+const RE_POSICAO_ELEVADOR =
+  /^(ve[ií]culo\s+(no|a|à|em)\s+)?(solo|meia\s+altura|altura\s+m[aá]xima)\s*:?$/i;
 
 interface Props {
   pdfFile: File | null;
@@ -85,10 +125,22 @@ export function AiCorrectionStep({
   const [maxQPerSection, setMaxQPerSection] = useState<number>(0);
   const [checklistId, setChecklistId] = useState(initialData?.checklist_id ?? "217");
   const [isGeneratingFields, setIsGeneratingFields] = useState(false);
+  // Arrasto de campos na aba Campos: o bloco sendo levado (o par km/tempo vai inteiro)
+  // e onde ele cairia, para desenhar a linha-guia.
+  const [arrasto, setArrasto] = useState<{ inicio: number; tamanho: number } | null>(null);
+  const [alvoArrasto, setAlvoArrasto] = useState<{ idx: number; antes: boolean } | null>(null);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editingName, setEditingName] = useState("");
   const [showStatusDb, setShowStatusDb] = useState(false);
   const [statusDbOutput, setStatusDbOutput] = useState(initialData?.status_db ?? "");
+  const [statusDbFormato, setStatusDbFormato] = useState<"planilha" | "mysql">("planilha");
+  // Bloco fixo da migration (status 0). Ligado por padrão: tabela sem ele não funciona no app.
+  const [incluirEssenciais, setIncluirEssenciais] = useState(true);
+  const [enviarAberto, setEnviarAberto] = useState(false);
+  // Repositório da API onde a migration é gravada: EI ou acampa, conforme o projeto, com o
+  // caminho lembrado no navegador (esta etapa do assistente só monta no cliente).
+  const repoMigrationChave: ChaveRepositorio = project === "pos-venda" ? "acampaApi" : "eiApi";
+  const [repoMigration, setRepoMigration] = useState<string>(() => caminhoDoRepositorio(repoMigrationChave));
   const [showStatusSql, setShowStatusSql] = useState(false);
   const [statusSqlOutput, setStatusSqlOutput] = useState(initialData?.status_sql ?? "");
 
@@ -131,15 +183,42 @@ export function AiCorrectionStep({
     return { text, pages };
   }, [pdfFile]);
 
+  /**
+   * Multipart do pós-venda: o PDF sobe junto para o servidor rasterizar as folhas. A
+   * estrutura desse tipo de checklist é lida da imagem — no texto do OCR os rótulos
+   * verticais viram fragmentos e as duas tabelas da folha colapsam na mesma linha.
+   */
+  const buildPosVendaForm = useCallback(
+    (text: string, apiKey: string): FormData => {
+      const fd = new FormData();
+      fd.append("text", text);
+      fd.append("model", model);
+      fd.append("apiKey", apiKey);
+      if (checklistType) fd.append("checklistType", checklistType);
+      if (pdfFile) fd.append("pdf", pdfFile);
+      // Imagem enviada à mão tem precedência no servidor: quando o próprio PDF já é um
+      // escaneamento, o scan do usuário costuma ler melhor que o render.
+      images.forEach((img, i) => fd.append(`images[${i}]`, img.file));
+      return fd;
+    },
+    [model, checklistType, pdfFile, images]
+  );
+
   const generateFields = useCallback(
     async (text: string, apiKey: string) => {
       setIsGeneratingFields(true);
       try {
-        const res = await fetch("/api/generate-fields", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text, model, apiKey, checklistType }),
-        });
+        const isPosVenda = checklistType === "pos-venda-inspecao";
+        const res = await (isPosVenda
+          ? fetch("/api/generate-fields", {
+              method: "POST",
+              body: buildPosVendaForm(text, apiKey),
+            })
+          : fetch("/api/generate-fields", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text, model, apiKey, checklistType }),
+            }));
         const data = await res.json();
         if (data.success && Array.isArray(data.fields)) {
           // A IA pode gerar campo para as notas de rodapé mesmo instruída a pular: o
@@ -148,7 +227,24 @@ export function AiCorrectionStep({
             (f) => !(checklistType === "plano-manutencao" && secaoIgnorada(f.secao)),
           );
           const descartados = data.fields.length - campos.length;
+          const etapas: string[] = Array.isArray(data.etapas) ? data.etapas : [];
+          const colisoes: { original: string; final: string }[] = Array.isArray(data.colisoes)
+            ? data.colisoes
+            : [];
           setMigrationFields(campos);
+          // Pós-venda: cada seção lida da folha vira um status. Os grupos NÃO podem vir
+          // do texto — o OCR dessas folhas não tem cabeçalho reconhecível, e tudo
+          // acabava caindo num status só. Quem sabe onde cada bloco começa é a leitura
+          // da imagem, que já chegou resolvida no `secao` de cada campo.
+          if (isPosVenda) {
+            const secs = gruposDasSecoes(campos);
+            if (secs.length > 0) {
+              skipWorkingGroupsParseRef.current = true;
+              setWorkingGroups(
+                secs.map((s) => ({ id: s.id, baseLabel: s.name, questions: s.questions })),
+              );
+            }
+          }
           if (data.truncated) {
             showToast(
               `Resposta truncada: ${campos.length} campos gerados, mas alguns itens podem ter ficado de fora. Gere novamente ou divida o checklist.`,
@@ -156,10 +252,23 @@ export function AiCorrectionStep({
             );
           } else {
             showToast(
-              descartados > 0
+              etapas.length > 0
+                ? `Airton leu ${campos.length} campos em ${etapas.length} etapa(s): ${etapas.join(" · ")}.`
+                : descartados > 0
                 ? `Airton gerou ${campos.length} campos (${descartados} do bloco NOTAS foram descartados).`
                 : `Airton gerou ${campos.length} campos!`,
               "success",
+            );
+          }
+          // Nome repetido viraria coluna duplicada na migration. O servidor renomeia para
+          // não derrubar a geração, mas quem decide o nome certo é quem está conferindo.
+          if (colisoes.length > 0) {
+            showToast(
+              `${colisoes.length} nome(s) de campo vieram repetidos e foram renomeados (${colisoes
+                .slice(0, 3)
+                .map((c) => c.final)
+                .join(", ")}${colisoes.length > 3 ? "..." : ""}). Confira na aba do banco.`,
+              "info",
             );
           }
         } else {
@@ -173,7 +282,7 @@ export function AiCorrectionStep({
         setIsGeneratingFields(false);
       }
     },
-    [model]
+    [model, checklistType, buildPosVendaForm]
   );
 
   const correctText = useCallback(
@@ -188,7 +297,10 @@ export function AiCorrectionStep({
         showToast("Selecione um PDF na etapa anterior.", "error");
         return;
       }
-      if (images.length === 0) {
+      // Pós-venda dispensa a imagem de referência: o servidor rasteriza as folhas do
+      // próprio PDF na hora de gerar os campos.
+      const isPosVenda = checklistType === "pos-venda-inspecao";
+      if (images.length === 0 && !isPosVenda) {
         showToast("Envie pelo menos uma imagem de referência.", "error");
         return;
       }
@@ -202,7 +314,17 @@ export function AiCorrectionStep({
 
         let finalText = "";
 
-        if (perPage && pages.length > 1) {
+        if (isPosVenda && images.length === 0) {
+          // Sem imagem não há contra o que corrigir, e corrigir não ajudaria: neste tipo
+          // o texto é só apoio para a grafia dos itens. Entra cru.
+          finalText = text;
+          setCorrectedText(finalText);
+          setActiveTab("corrected");
+          showToast(
+            "Texto extraído. A estrutura será lida das folhas ao gerar os campos.",
+            "info",
+          );
+        } else if (perPage && pages.length > 1) {
           const results: string[] = [];
           for (let i = 0; i < pages.length; i++) {
             const pageText = pages[i];
@@ -265,7 +387,18 @@ export function AiCorrectionStep({
         setProcessingStep(null);
       }
     },
-    [pdfFile, images, model, instructions, getApiKey, onOpenApiKeyModal, extractPdf, project, generateFields]
+    [
+      pdfFile,
+      images,
+      model,
+      instructions,
+      getApiKey,
+      onOpenApiKeyModal,
+      extractPdf,
+      project,
+      generateFields,
+      checklistType,
+    ]
   );
 
   function buildFormData(text: string, apiKey: string, pageNumber?: number): FormData {
@@ -298,8 +431,12 @@ export function AiCorrectionStep({
       ? (line: string) => /^[A-E]\s*-\s+[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ]/i.test(line)
       : isPlano
       ? // no plano as notas de rodapé ("(1)", "12.000") também não têm minúscula —
-        // a seção precisa ter pelo menos uma letra
-        (line: string) => semMinuscula(line) && /[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ]/.test(line)
+        // a seção precisa ter pelo menos uma letra. As posições do elevador valem em
+        // qualquer caixa: a IA de correção às vezes devolve "Solo" / "Meia altura", e
+        // aí a folha inteira caía num grupo só.
+        (line: string) =>
+          RE_POSICAO_ELEVADOR.test(line) ||
+          (semMinuscula(line) && /[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ]/.test(line))
       : isRevisao
       ? semMinuscula
       : (line: string) => /^\d+\s+[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇÀÈÌÒÙÄËÏÖÜ]/.test(line);
@@ -400,7 +537,10 @@ export function AiCorrectionStep({
   }
 
   function handleResetSections() {
-    const secs = parseSectionsFromText(correctedText);
+    const secs =
+      checklistType === "pos-venda-inspecao" && migrationFields.length > 0
+        ? gruposDasSecoes(migrationFields)
+        : parseSectionsFromText(correctedText);
     setWorkingGroups(secs.map((s) => ({ id: s.id, baseLabel: s.name, questions: s.questions })));
   }
 
@@ -461,6 +601,9 @@ export function AiCorrectionStep({
       skipWorkingGroupsParseRef.current = false;
       return;
     }
+    // Pós-venda monta os grupos a partir dos campos (ver generateFields); reparsear o
+    // texto aqui desfaria isso a cada mudança do texto corrigido.
+    if (checklistType === "pos-venda-inspecao") return;
     if (!correctedText) { setWorkingGroups([]); return; }
     const secs = parseSectionsFromText(correctedText);
     setWorkingGroups(secs.map((s) => ({ id: s.id, baseLabel: s.name, questions: s.questions })));
@@ -515,8 +658,14 @@ export function AiCorrectionStep({
     // Os títulos de seção entram como comentários "//SEÇÃO //" — além de identificar os
     // blocos, é o formato que o Designer de PDF reconhece ao colar esta migration nele.
     const lines: string[] = [];
+    // Campos essenciais (status 0): o bloco fixo do tipo vem antes dos itens. Item com o
+    // mesmo nome de uma coluna do bloco não é repetido — coluna duplicada derruba a migration.
+    const essenciais = incluirEssenciais ? camposEssenciais(checklistType) : [];
+    const jaNoBloco = incluirEssenciais ? colunasEssenciais(checklistType) : new Set<string>();
+    essenciais.forEach((l) => lines.push(`            ${l}`));
     let lastSecao: string | null = null;
     fields.forEach((f) => {
+      if (jaNoBloco.has(f.campo)) return;
       const secao = (f.secao || "").trim();
       if (secao !== lastSecao) {
         if (secao) {
@@ -552,6 +701,30 @@ ${cols}${extraCols}
         Schema::dropIfExists('${safeTable}');
     }
 };`;
+  }
+
+  /**
+   * Grava a migration em database/migrations do repositório da API, com o nome datado do
+   * Laravel no padrão de cada repositório (o acampa usa "create_table_<tabela>").
+   */
+  async function gravarMigration() {
+    const tabela = migrationTableName.trim();
+    if (!tabela || tabela === "tabela_generica" || !/^[a-z0-9_]+$/.test(tabela)) {
+      showToast("Dê um nome de tabela válido (minúsculas, números e _) antes de gravar.", "error");
+      return;
+    }
+    const nome =
+      repoMigrationChave === "acampaApi"
+        ? `${prefixoMigration()}_create_table_${tabela}.php`
+        : `${prefixoMigration()}_create_${tabela}_table.php`;
+    try {
+      const r = await gravarNoRepositorio(repoMigrationChave, repoMigration, [
+        { caminho: `database/migrations/${nome}`, texto: buildMigrationCode(tabela, migrationFields) + "\n" },
+      ]);
+      if (r) showToast(`Migration gravada: ${r.arquivos[0]}. Rode o migrate quando revisar.`, "success");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Não consegui gravar a migration.", "error");
+    }
   }
 
   function buildStatusRows(groups: WorkingGroup[]): string {
@@ -603,6 +776,20 @@ ${cols}${extraCols}
     ]);
 
     return [dados, ...sectionRows, assinaturaConsultor, assinaturaCliente, finalizado].join("\n");
+  }
+
+  /**
+   * Linhas do `checklist_status`. "mysql" são as MESMAS colunas do Formato DB na escrita
+   * do INSERT, como sai no checklist_perguntas: aspas simples, vírgula e NULL sem aspas,
+   * com '' na frente para o id auto_increment. Sem blob e sem coluna extra no fim.
+   */
+  function gerarStatusDb(formato: "planilha" | "mysql") {
+    const planilha = buildStatusRows(workingGroups);
+    setStatusDbOutput(
+      formato === "mysql" ? paraMysql(planilha, { idVazio: true, indiceExtra: -1, sufixo: [] }) : planilha,
+    );
+    setStatusDbFormato(formato);
+    setShowStatusDb(true);
   }
 
   function buildSqlInserts(groups: WorkingGroup[]): string {
@@ -675,6 +862,31 @@ ${cols}${extraCols}
   // No plano não existe migration: os campos são a coluna `campo` das perguntas e as
   // propriedades lidas no PHP do PDF. Chamar a aba de "migration" ali confunde.
   const rotuloCampos = isPlanoManutencao ? "Campos do Formulário" : "Campos de Migration";
+
+  /** Bloco que se move junto com o campo `idx`: no plano, o par km/tempo não se separa. */
+  const blocoDoCampo = (idx: number): { inicio: number; tamanho: number } => {
+    const par = isPlanoManutencao ? parKmTempo(migrationFields, idx) : null;
+    return par ? { inicio: par.inicio, tamanho: 2 } : { inicio: idx, tamanho: 1 };
+  };
+
+  /** Alvo do arrasto sobre a linha `idx`; soltar no meio de um par vai para a borda dele. */
+  const marcarAlvo = (idx: number, antes: boolean) => {
+    const b = blocoDoCampo(idx);
+    const alvo = { idx: antes ? b.inicio : b.inicio + b.tamanho - 1, antes };
+    setAlvoArrasto((prev) =>
+      prev && prev.idx === alvo.idx && prev.antes === alvo.antes ? prev : alvo,
+    );
+  };
+
+  const soltarArrasto = () => {
+    if (arrasto && alvoArrasto) {
+      setMigrationFields((prev) =>
+        moverCampos(prev, arrasto.inicio, arrasto.tamanho, alvoArrasto.idx, alvoArrasto.antes),
+      );
+    }
+    setArrasto(null);
+    setAlvoArrasto(null);
+  };
 
   return (
     <div ref={containerRef} className="space-y-6">
@@ -934,6 +1146,18 @@ ${cols}${extraCols}
                   <AirtonBadge />
                 </h3>
                 <div className="flex gap-2">
+                  {/* Pós-venda: os campos já saem na ordem do formulário, com etapa e seção —
+                      a skill do acampa-checklist monta o imprimir.php a partir deles. */}
+                  {checklistType === "pos-venda-inspecao" && migrationFields.length > 0 && (
+                    <button
+                      onClick={() => setEnviarAberto(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#173872] hover:bg-[#122d5e] text-white text-sm font-medium transition-colors"
+                      title="Grava as folhas e os campos (pos_venda.json) no acampa-checklist e gera o comando da skill checklist-pos-venda."
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      Enviar para o Claude Code
+                    </button>
+                  )}
                   {correctedText && (
                     <button
                       onClick={() => {
@@ -1024,6 +1248,7 @@ ${cols}${extraCols}
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-[#F9F9F9] border-b border-[#e0e0e0]">
+                          <th className="w-6" />
                           <th className="text-left px-4 py-3 text-[#0BB783] font-semibold w-52">campo</th>
                           <th className="text-left px-4 py-3 text-[#464E5F] font-semibold">pergunta</th>
                           <th
@@ -1046,12 +1271,33 @@ ${cols}${extraCols}
                           const secao = (field.secao ?? "").trim();
                           const secaoAnterior = (migrationFields[idx - 1]?.secao ?? "").trim();
                           const abreSecao = !!secao && secao !== secaoAnterior;
+                          const emArrasto =
+                            !!arrasto && idx >= arrasto.inicio && idx < arrasto.inicio + arrasto.tamanho;
+                          // Linha-guia: acima da linha (soltar antes) ou abaixo (soltar depois).
+                          const guia =
+                            arrasto && alvoArrasto?.idx === idx && !emArrasto
+                              ? alvoArrasto.antes
+                                ? "shadow-[inset_0_2px_0_#22B9FF]"
+                                : "shadow-[inset_0_-2px_0_#22B9FF]"
+                              : "";
                           return (
                           <Fragment key={idx}>
                           {abreSecao && (
-                            <tr className="bg-[#22B9FF]/5 border-b border-[#22B9FF]/20">
+                            <tr
+                              className="bg-[#22B9FF]/5 border-b border-[#22B9FF]/20"
+                              // Soltar no título da seção = virar o 1º campo dela.
+                              onDragOver={(e) => {
+                                if (!arrasto) return;
+                                e.preventDefault();
+                                marcarAlvo(idx, true);
+                              }}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                soltarArrasto();
+                              }}
+                            >
                               <td
-                                colSpan={3}
+                                colSpan={4}
                                 className="px-4 py-1.5 text-[11px] font-bold uppercase tracking-wide text-[#22B9FF]"
                               >
                                 {secao}
@@ -1061,8 +1307,40 @@ ${cols}${extraCols}
                           <tr
                             className={`border-b border-[#e8e8e8] hover:bg-[#FAFAFA] transition-colors ${
                               modo === "ambos" ? "bg-[#22B9FF]/5" : ""
-                            }`}
+                            } ${emArrasto ? "opacity-40" : ""} ${guia}`}
+                            onDragOver={(e) => {
+                              if (!arrasto) return;
+                              e.preventDefault();
+                              const r = e.currentTarget.getBoundingClientRect();
+                              marcarAlvo(idx, e.clientY < r.top + r.height / 2);
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              soltarArrasto();
+                            }}
                           >
+                            <td className="pl-2 py-2 w-6">
+                              {/* Só a alça é arrastável: a linha inteira arrastável roubaria
+                                  a seleção de texto dos inputs. */}
+                              <span
+                                draggable
+                                onDragStart={(e) => {
+                                  const tr = e.currentTarget.closest("tr");
+                                  if (tr) e.dataTransfer.setDragImage(tr, 16, 16);
+                                  e.dataTransfer.effectAllowed = "move";
+                                  e.dataTransfer.setData("text/plain", String(idx));
+                                  setArrasto(blocoDoCampo(idx));
+                                }}
+                                onDragEnd={() => {
+                                  setArrasto(null);
+                                  setAlvoArrasto(null);
+                                }}
+                                className="flex cursor-grab active:cursor-grabbing text-[#b0b0bf] hover:text-[#22B9FF]"
+                                title="Arraste para mudar o campo de posição ou de seção"
+                              >
+                                <GripVertical className="w-4 h-4" />
+                              </span>
+                            </td>
                             <td className="px-3 py-2">
                               <input
                                 type="text"
@@ -1172,6 +1450,21 @@ ${cols}${extraCols}
                         Copiar
                       </button>
                     </div>
+                    {temCamposEssenciais(checklistType) && (
+                      <label className="flex items-start gap-2 text-xs text-[#464E5F] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={incluirEssenciais}
+                          onChange={(e) => setIncluirEssenciais(e.target.checked)}
+                          className="mt-0.5"
+                        />
+                        <span>
+                          Incluir os campos essenciais (status 0) deste modelo — chave, concessionária,
+                          consultor, veículo, cliente, datas ({camposEssenciais(checklistType).length} colunas).
+                          Não vêm da folha; o bloco foi copiado da migration mais recente do tipo.
+                        </span>
+                      </label>
+                    )}
                     <div className="flex items-center gap-2">
                       <label className="text-xs text-[#80808F] whitespace-nowrap">
                         Nome da tabela:
@@ -1187,6 +1480,24 @@ ${cols}${extraCols}
                     <pre className="bg-[#F9F9F9] border border-[#e0e0e0] rounded-lg p-4 text-xs font-mono text-[#464E5F] overflow-auto max-h-96 whitespace-pre">
                       {buildMigrationCode(migrationTableName, migrationFields)}
                     </pre>
+                    {/* Grava o arquivo da migration no repositório da API. Rodar o migrate
+                        continua com o usuário. */}
+                    <div className="flex flex-wrap items-start gap-2 rounded-lg border border-[#e0e0e0] bg-[#F9F9F9] px-3 py-2">
+                      <div className="flex-1 min-w-[260px] space-y-1">
+                        <span className="text-xs text-[#80808F]">
+                          {REPOSITORIOS[repoMigrationChave].rotulo} (onde está na sua máquina):
+                        </span>
+                        <CampoRepositorio chave={repoMigrationChave} valor={repoMigration} onChange={setRepoMigration} />
+                      </div>
+                      <button
+                        onClick={() => void gravarMigration()}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#FFB822] hover:bg-[#f0a800] text-white text-xs font-semibold transition-colors"
+                        title="Grava database/migrations/<data>_create_..._table.php no repositório. O migrate você roda."
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Gravar no repositório
+                      </button>
+                    </div>
                   </div>
                   )}
                 </div>
@@ -1427,14 +1738,19 @@ ${cols}${extraCols}
                   </div>
                   <div className="flex gap-2">
                     <button
-                      onClick={() => {
-                        setStatusDbOutput(buildStatusRows(workingGroups));
-                        setShowStatusDb(true);
-                      }}
+                      onClick={() => gerarStatusDb("planilha")}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#22B9FF]/10 hover:bg-[#22B9FF]/20 text-[#22B9FF] text-sm font-medium transition-colors border border-[#22B9FF]/30"
                     >
                       <Copy className="w-3.5 h-3.5" />
                       Formato DB
+                    </button>
+                    <button
+                      onClick={() => gerarStatusDb("mysql")}
+                      title="As mesmas colunas, na escrita do MySQL: aspas simples, vírgula e NULL sem aspas"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0BB783]/10 hover:bg-[#0BB783]/20 text-[#0BB783] text-sm font-medium transition-colors border border-[#0BB783]/30"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      Formato MySQL
                     </button>
                     <button
                       onClick={() => {
@@ -1454,14 +1770,23 @@ ${cols}${extraCols}
               {showStatusDb && statusDbOutput && (
                 <div className="space-y-2 pt-3 border-t border-[#e8e8e8]">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-semibold text-[#22B9FF]">
-                      Formato DB (checklist_status)
+                    <h4
+                      className={`text-sm font-semibold ${
+                        statusDbFormato === "mysql" ? "text-[#0BB783]" : "text-[#22B9FF]"
+                      }`}
+                    >
+                      {statusDbFormato === "mysql"
+                        ? "Formato MySQL (checklist_status)"
+                        : "Formato DB (checklist_status)"}
                     </h4>
                     <div className="flex gap-2">
                       <button
                         onClick={() => {
                           navigator.clipboard.writeText(statusDbOutput);
-                          showToast("Formato DB copiado!", "success");
+                          showToast(
+                            statusDbFormato === "mysql" ? "Formato MySQL copiado!" : "Formato DB copiado!",
+                            "success",
+                          );
                         }}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#22B9FF]/10 hover:bg-[#22B9FF]/20 text-[#22B9FF] text-sm transition-colors"
                       >
@@ -1533,6 +1858,14 @@ ${cols}${extraCols}
         </div>
       )}
       <ScrollButtons containerRef={containerRef} />
+      {enviarAberto && (
+        <EnviarPosVendaModal
+          campos={migrationFields}
+          pdfFile={pdfFile}
+          images={images}
+          onClose={() => setEnviarAberto(false)}
+        />
+      )}
     </div>
   );
 }

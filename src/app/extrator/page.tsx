@@ -15,6 +15,8 @@ import {
   Search,
   ClipboardCheck,
   CalendarCheck,
+  CarFront,
+  BookOpen,
 } from "lucide-react";
 import Link from "next/link";
 import { FilesUploadStep } from "./components/files-upload-step";
@@ -74,6 +76,13 @@ const POS_VENDA_TYPES: TipoCard[] = [
     name: "Plano de Manutenção Programada",
     description: "Revisões por km/meses — sem migration, banco por página",
     icon: CalendarCheck,
+    available: true,
+  },
+  {
+    id: "pos-venda-inspecao" as ChecklistType,
+    name: "Checklist de Inspeção de Veículos",
+    description: "Folhas com colunas de etapa (Entrada/Saída) — estrutura lida da imagem",
+    icon: CarFront,
     available: true,
   },
 ];
@@ -203,6 +212,10 @@ export default function ExtratorPage() {
 
   const selectedProjectData = PROJECTS.find((p) => p.id === selectedProject);
   const tiposDoProjeto = selectedProject ? TYPES_BY_PROJECT[selectedProject] : [];
+  // Pós-venda lê a estrutura das folhas renderizadas do próprio PDF, então a imagem de
+  // referência deixa de ser obrigatória: cobrá-la aqui faria o passo parecer incompleto.
+  const imagensOpcionais = checklistType === "pos-venda-inspecao";
+  const arquivosProntos = !!pdfFile && (imagensOpcionais || images.length > 0);
 
   if (showNameStep) {
     return (
@@ -324,6 +337,16 @@ export default function ExtratorPage() {
               </>
             )}
           </div>
+          <div className="flex items-center gap-2">
+          <Link
+            href="/manual#extrator"
+            target="_blank"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#e8e8e8] hover:border-[#173872]/40 text-[#464E5F] hover:bg-[#F9F9F9] transition-all text-sm font-medium"
+            title="Passo a passo do extrator (abre em outra aba)"
+          >
+            <BookOpen className="w-4 h-4" />
+            Manual
+          </Link>
           <button
             onClick={() => setShowApiModal(true)}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#173872]/30 hover:border-[#173872] text-[#173872] hover:bg-[#173872]/5 transition-all text-sm font-medium"
@@ -331,6 +354,7 @@ export default function ExtratorPage() {
             <Key className="w-4 h-4" />
             API Key
           </button>
+          </div>
         </div>
       </header>
 
@@ -482,12 +506,10 @@ export default function ExtratorPage() {
               <div className="flex items-center gap-3 px-6 py-4 border-b border-[#e8e8e8]">
                 <span
                   className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white ${
-                    pdfFile && images.length > 0
-                      ? "bg-[#0BB783]"
-                      : "bg-[#ED3237]"
+                    arquivosProntos ? "bg-[#0BB783]" : "bg-[#ED3237]"
                   }`}
                 >
-                  {pdfFile && images.length > 0 ? "✓" : "3"}
+                  {arquivosProntos ? "✓" : "3"}
                 </span>
                 <h2 className="text-base font-semibold text-[#464E5F] flex items-center gap-2">
                   <FolderOpen className="w-5 h-5 text-[#173872]" />
@@ -500,6 +522,7 @@ export default function ExtratorPage() {
                   onPdfChange={setPdfFile}
                   images={images}
                   onImagesChange={setImages}
+                  imagensOpcionais={imagensOpcionais}
                 />
               </div>
             </section>

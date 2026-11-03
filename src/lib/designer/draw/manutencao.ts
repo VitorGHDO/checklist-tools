@@ -5,9 +5,10 @@
 // que ancora pelo canto SUPERIOR ESQUERDO. Por isso a marcação é desenhada dentro de uma
 // caixa de `iconMm` começando em (colunaX, markerY) — é onde o símbolo cai na folha.
 //
-// Os símbolos são os mesmos do PDF: ✓ (resposta 1) e X (resposta 3).
+// Os símbolos são os mesmos do PDF: ✓ (resposta 1) e X (resposta 3) no modo glifo; bola,
+// triângulo e X coloridos no modo imagem (os JPGs dos planos antigos).
 
-import { colunaPreview, colunasVisiveis, itemNaColuna } from "../manutencao";
+import { colunaPreview, colunasVisiveis, itemNaColuna, usaImagens } from "../manutencao";
 import type { DesignerGroup, DesignerPage, ManutencaoConfig } from "../types";
 
 const COR_CHECK = "#0BB783";
@@ -59,6 +60,56 @@ function desenharGlifo(
   ctx.restore();
 }
 
+/**
+ * Modo "imagem": imita os JPGs da pasta marcacoes — bola verde, triângulo amarelo e X
+ * vermelho, ocupando a caixa inteira, que é o tamanho do Image() no PDF.
+ */
+function desenharImagem(
+  ctx: CanvasRenderingContext2D,
+  type: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): void {
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const lado = Math.min(w, h);
+  ctx.save();
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  if (type === "3") {
+    const d = lado * 0.38;
+    ctx.beginPath();
+    ctx.moveTo(cx - d, cy - d);
+    ctx.lineTo(cx + d, cy + d);
+    ctx.moveTo(cx + d, cy - d);
+    ctx.lineTo(cx - d, cy + d);
+    ctx.strokeStyle = "rgba(255,255,255,0.92)";
+    ctx.lineWidth = lado * 0.36;
+    ctx.stroke();
+    ctx.strokeStyle = COR_X;
+    ctx.lineWidth = lado * 0.22;
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    if (type === "2") {
+      ctx.moveTo(cx, y + lado * 0.06);
+      ctx.lineTo(x + w - lado * 0.04, y + h - lado * 0.1);
+      ctx.lineTo(x + lado * 0.04, y + h - lado * 0.1);
+      ctx.closePath();
+    } else {
+      ctx.arc(cx, cy, lado * 0.46, 0, Math.PI * 2);
+    }
+    ctx.strokeStyle = "rgba(255,255,255,0.92)";
+    ctx.lineWidth = Math.max(2, lado * 0.14);
+    ctx.stroke();
+    ctx.fillStyle = type === "2" ? COR_TRIANGULO : COR_CHECK;
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 export function drawManutencaoGroupMarkers(
   ctx: CanvasRenderingContext2D,
   cv: HTMLCanvasElement,
@@ -73,6 +124,7 @@ export function drawManutencaoGroupMarkers(
   const iconW = (cfg.iconMm / page.widthMm) * cv.width;
   const iconH = (cfg.iconMm / page.heightMm) * cv.height;
   const x = coluna ? (coluna.x / page.widthMm) * cv.width : cv.width / 2;
+  const desenhar = usaImagens(cfg) ? desenharImagem : desenharGlifo;
 
   group.markers.forEach((m, idx) => {
     const y = m.fy * cv.height;
@@ -93,33 +145,33 @@ export function drawManutencaoGroupMarkers(
     ctx.stroke();
     ctx.restore();
 
-    // Demais revisões (modo "ver todas"): mesma linha, X de cada coluna, esmaecidas
-    // para não competir com a revisão em foco. Só a de foco leva número e seleção.
+    // Demais revisões (modo "ver todas"): mesma linha, X de cada coluna, um pouco mais
+    // apagadas que a revisão em foco. Só a de foco leva número e seleção.
     visiveis.forEach((c) => {
       if (c.id === coluna?.id) return;
       const cx = (c.x / page.widthMm) * cv.width;
       const nesta = itemNaColuna(cfg, m, c.id);
       ctx.save();
-      ctx.globalAlpha = nesta ? 0.45 : 0.12;
-      desenharGlifo(ctx, m.type || "1", cx, y, iconW, iconH);
+      ctx.globalAlpha = nesta ? 0.85 : 0.3;
+      desenhar(ctx, m.type || "1", cx, y, iconW, iconH);
       ctx.restore();
       ctx.save();
-      ctx.globalAlpha = 0.5;
+      ctx.globalAlpha = 0.8;
       ctx.setLineDash(nesta ? [] : [iconW * 0.3, iconW * 0.3]);
-      ctx.strokeStyle = "rgba(70,78,95,0.35)";
+      ctx.strokeStyle = "rgba(70,78,95,0.45)";
       ctx.lineWidth = Math.max(1, cv.width * 0.0008);
       ctx.strokeRect(cx, y, iconW, iconH);
       ctx.restore();
     });
 
     ctx.save();
-    if (!impresso) ctx.globalAlpha = 0.22;
-    desenharGlifo(ctx, m.type || "1", x, y, iconW, iconH);
+    if (!impresso) ctx.globalAlpha = 0.4;
+    desenhar(ctx, m.type || "1", x, y, iconW, iconH);
     ctx.restore();
 
     ctx.save();
     ctx.setLineDash(impresso ? [] : [iconW * 0.3, iconW * 0.3]);
-    ctx.strokeStyle = isSel ? "rgba(242,169,74,0.95)" : "rgba(70,78,95,0.35)";
+    ctx.strokeStyle = isSel ? "rgba(242,169,74,0.95)" : "rgba(70,78,95,0.55)";
     ctx.lineWidth = Math.max(1, cv.width * (isSel ? 0.0016 : 0.0008));
     ctx.strokeRect(x, y, iconW, iconH);
     ctx.restore();

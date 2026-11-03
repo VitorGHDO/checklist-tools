@@ -9,8 +9,10 @@ import {
   ChevronsDown,
   ChevronsUp,
   Crosshair,
+  GripVertical,
   Link2,
   Merge,
+  ScanLine,
   X,
 } from "lucide-react";
 import { showToast } from "@/components/ui/toast";
@@ -54,6 +56,22 @@ interface Props {
   onMoveMarkerToPrev?: (page: DesignerPage, group: DesignerGroup, index: number) => void;
   /** manutenção: abre a grade de revisões no item clicado. */
   onAbrirGrade?: (markerId: string) => void;
+  /** Arrastar e soltar o grupo na sidebar (reordenar ou trocar de folha). */
+  arrasto?: ArrastoGrupo;
+}
+
+export interface ArrastoGrupo {
+  inicio: () => void;
+  fim: () => void;
+  /** O mouse está sobre este card: antes = metade de cima. */
+  sobre: (antes: boolean) => void;
+  soltar: () => void;
+  /** Linha-guia deste card: onde o grupo arrastado cairia. */
+  guia: "antes" | "depois" | null;
+  /** Este card é o que está sendo arrastado. */
+  ativo: boolean;
+  /** Há algum grupo sendo arrastado (o card vira alvo). */
+  emCurso: boolean;
 }
 
 export function GroupCard({
@@ -69,6 +87,7 @@ export function GroupCard({
   formularioCfg,
   onMoveMarkerToPrev,
   onAbrirGrade,
+  arrasto,
 }: Props) {
   const posyRef = useRef<HTMLInputElement>(null);
   const splitRef = useRef<HTMLInputElement>(null);
@@ -227,10 +246,52 @@ export function GroupCard({
     commit();
   }
 
+  const guia =
+    arrasto?.guia === "antes"
+      ? "shadow-[0_-3px_0_#8950FC]"
+      : arrasto?.guia === "depois"
+      ? "shadow-[0_3px_0_#8950FC]"
+      : "";
+
   return (
-    <div className={`border rounded-xl overflow-hidden ${isActive ? "border-[#173872]/40" : "border-[#e0e0e0]"}`}>
+    <div
+      className={`border rounded-xl overflow-hidden ${isActive ? "border-[#173872]/40" : "border-[#e0e0e0]"} ${guia} ${
+        arrasto?.ativo ? "opacity-40" : ""
+      }`}
+      onDragOver={(e) => {
+        if (!arrasto?.emCurso) return;
+        e.preventDefault();
+        const r = e.currentTarget.getBoundingClientRect();
+        arrasto.sobre(e.clientY < r.top + r.height / 2);
+      }}
+      onDrop={(e) => {
+        if (!arrasto?.emCurso) return;
+        e.preventDefault();
+        arrasto.soltar();
+      }}
+    >
       {/* header */}
       <div onClick={onHeaderClick} className={`flex items-center gap-1.5 px-2 py-2 cursor-pointer ${isActive ? "bg-[#173872]/5" : "bg-[#F9F9F9]"}`}>
+        {arrasto && (
+          // Só a alça arrasta: o header inteiro arrastável roubaria a edição do título.
+          <span
+            draggable
+            onClick={(e) => e.stopPropagation()}
+            onDragStart={(e) => {
+              e.stopPropagation();
+              e.dataTransfer.effectAllowed = "move";
+              e.dataTransfer.setData("text/plain", group.id);
+              const card = e.currentTarget.closest("div.rounded-xl");
+              if (card) e.dataTransfer.setDragImage(card, 12, 12);
+              arrasto.inicio();
+            }}
+            onDragEnd={() => arrasto.fim()}
+            className="shrink-0 cursor-grab active:cursor-grabbing text-[#b0b0bf] hover:text-[#8950FC]"
+            title="Arraste para reordenar ou para outra folha"
+          >
+            <GripVertical className="w-3.5 h-3.5" />
+          </span>
+        )}
         <input
           type="checkbox"
           checked={!!st.checkedGroups[group.id]}
@@ -405,6 +466,32 @@ export function GroupCard({
             <Crosshair className="w-3 h-3" /> capturar
           </button>
         </div>
+
+        {/* Medição na arte: substitui o passo fixo pelos centros reais das células. */}
+        <div className="flex items-center gap-2 text-xs">
+          <button onClick={() => startCapture({ kind: "medirLinhas", groupId: group.id })}
+            className="flex items-center gap-1 px-2 py-1 rounded bg-[#173872]/10 hover:bg-[#173872]/20 border border-[#173872]/30 text-[#173872]"
+            title="Clique em dois cantos opostos da faixa das colunas de marcação deste bloco. O Designer lê as divisórias da imagem e põe cada item no centro da sua linha — linhas de alturas diferentes deixam de acumular erro.">
+            <ScanLine className="w-3 h-3" /> medir linhas
+          </button>
+          {/* Plano e formulário têm as colunas no painel do documento, não no grupo. */}
+          {dt !== "manutencao" && dt !== "formulario" && (
+            <button onClick={() => startCapture({ kind: "medirColunas", alvo: { alvo: "grupo", groupId: group.id } })}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-[#173872]/10 hover:bg-[#173872]/20 border border-[#173872]/30 text-[#173872]"
+              title={
+                dt === "revisao"
+                  ? "Clique em dois cantos da linha de rótulos ✔ ✖ N.A. (ou de uma linha de caixinhas): grava colX1..3."
+                  : dt === "posvenda"
+                  ? "Clique em dois cantos da linha de rótulos das opções (C / NC / N.A.): grava o X de cada opção, na ordem."
+                  : "Clique em dois cantos em volta da coluna de marcação: grava o X do grupo."
+              }>
+              <ScanLine className="w-3 h-3 rotate-90" /> medir colunas
+            </button>
+          )}
+        </div>
+        <p className="text-[10px] text-[#80808F] leading-snug -mt-1">
+          linhas: faixa só das colunas de marcação, sem o texto · colunas: só a linha dos rótulos
+        </p>
 
         {/* $posY real conhecido (todos) */}
         <div className="flex items-center gap-2 text-xs">

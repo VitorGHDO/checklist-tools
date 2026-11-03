@@ -12,6 +12,8 @@ interface Props {
   onPdfChange: (file: File | null) => void;
   images: UploadedImage[];
   onImagesChange: (imgs: UploadedImage[]) => void;
+  /** Tipos que rasterizam a folha do próprio PDF — a imagem vira reforço, não requisito. */
+  imagensOpcionais?: boolean;
 }
 
 export function FilesUploadStep({
@@ -19,6 +21,7 @@ export function FilesUploadStep({
   onPdfChange,
   images,
   onImagesChange,
+  imagensOpcionais = false,
 }: Props) {
   const handlePdf = useCallback(
     (files: FileList) => {
@@ -133,10 +136,23 @@ export function FilesUploadStep({
         <h3 className="text-sm font-medium text-[#464E5F] flex items-center gap-2">
           <Images className="w-4 h-4 text-[#173872]" />
           Imagens de Referência
+          {imagensOpcionais && (
+            <span className="text-[10px] font-normal uppercase tracking-wide text-[#80808F] border border-[#e0e0e0] rounded px-1.5 py-0.5">
+              opcional
+            </span>
+          )}
           {images.length > 0 && (
             <span className="text-xs text-[#80808F]">({images.length})</span>
           )}
         </h3>
+
+        {imagensOpcionais && (
+          <p className="text-xs text-[#80808F] leading-snug">
+            As folhas deste PDF são renderizadas no servidor e lidas direto pela IA. Só
+            envie imagens se tiver um escaneamento melhor que o próprio PDF — nesse caso
+            elas substituem o render.
+          </p>
+        )}
 
         <DropZone
           onFileDrop={addImages}
